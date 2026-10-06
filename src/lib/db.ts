@@ -5,7 +5,7 @@ import type {
   Production, ComptoirItem, Destruction, Worker, Role, Expense, CaisseTransaction,
   CaisseReport, StoreSettings, PartyPayment, CommandDelivery, WorkerOvertime,
   PurchaseOrder, PaymentMethodDetails, PartyOldDebt, PartyCreditRefund, PartyType,
-  CommandAdjustment,
+  CommandAdjustment, DeliveryRecovery, FreeInvoice,
 } from '@/types';
 import type { Command } from '@/store/commandStore';
 import type { FicheTechnic } from '@/store/ficheTechnicStore';
@@ -305,12 +305,19 @@ const toCommandDelivery = (r: any): CommandDelivery => ({
   restAmount: num(r.rest_amount),
   saleId: r.sale_id ?? undefined,
   saleReference: r.sale_reference ?? undefined,
+  source: r.source === 'livraison' ? 'livraison' : 'command',
   createdBy: r.created_by ?? undefined,
   items: (r.command_delivery_items ?? []).map((i: any) => ({
     commandItemId: i.command_item_id ?? undefined,
     productName: i.product_name,
     quantity: num(i.quantity),
     sellUnit: i.sell_unit ?? undefined,
+    ficheTechnicId: i.fiche_technic_id ?? undefined,
+    readyApplied: i.ready_applied ?? false,
+    fromReady: num(i.from_ready),
+    producedQuantity: num(i.produced_quantity),
+    unitCost: num(i.unit_cost),
+    costAmount: num(i.cost_amount),
   })),
   consumptions: (r.command_delivery_consumptions ?? []).map((c: any) => ({
     id: c.id,
@@ -325,6 +332,85 @@ const toCommandDelivery = (r: any): CommandDelivery => ({
     unitCost: num(c.unit_cost),
     lineCost: num(c.line_cost),
   })),
+});
+
+/** Récupération (retour) de marchandise sur un bon de livraison. */
+const toDeliveryRecovery = (r: any): DeliveryRecovery => ({
+  id: r.id,
+  reference: r.reference,
+  deliveryId: r.delivery_id,
+  commandId: r.command_id ?? undefined,
+  clientId: r.client_id ?? undefined,
+  clientName: r.client_name ?? undefined,
+  date: r.date,
+  recoveredAt: r.recovered_at ?? r.created_at,
+  reason: r.reason ?? '',
+  tvaEnabled: r.tva_enabled ?? false,
+  tvaRate: num(r.tva_rate),
+  totalHt: num(r.total_ht),
+  tvaAmount: num(r.tva_amount),
+  totalTtc: num(r.total_ttc),
+  excessAmount: num(r.excess_amount),
+  refundAmount: num(r.refund_amount),
+  refundMethod: (r.refund_method ?? 'especes') as DeliveryRecovery['refundMethod'],
+  refundId: r.refund_id ?? undefined,
+  isHistorical: r.is_historical ?? false,
+  createdAt: r.created_at,
+  createdBy: r.created_by ?? undefined,
+  items: (r.delivery_recovery_items ?? []).map((i: any) => ({
+    commandItemId: i.command_item_id ?? undefined,
+    ficheTechnicId: i.fiche_technic_id ?? undefined,
+    productName: i.product_name,
+    quantity: num(i.quantity),
+    unitPrice: num(i.unit_price),
+    amount: num(i.amount),
+    unit: i.unit ?? undefined,
+    readyApplied: i.ready_applied ?? true,
+    unitCost: num(i.unit_cost),
+    costAmount: num(i.cost_amount),
+  })),
+});
+
+/** Facture non comptabilisée (document seulement imprimé). */
+const toFreeInvoice = (r: any): FreeInvoice => ({
+  id: r.id,
+  reference: r.reference,
+  docType: (['facture', 'bon_livraison', 'proforma'].includes(r.doc_type) ? r.doc_type : 'facture') as FreeInvoice['docType'],
+  clientId: r.client_id ?? undefined,
+  clientName: r.client_name ?? '',
+  clientPhone: r.client_phone ?? undefined,
+  clientAddress: r.client_address ?? undefined,
+  clientRc: r.client_rc ?? undefined,
+  clientNif: r.client_nif ?? undefined,
+  clientNis: r.client_nis ?? undefined,
+  clientArticle: r.client_article ?? undefined,
+  date: r.date,
+  location: r.location ?? undefined,
+  driverName: r.driver_name ?? undefined,
+  driverPlate: r.driver_plate ?? undefined,
+  tvaEnabled: r.tva_enabled ?? false,
+  tvaRate: num(r.tva_rate),
+  reduction: num(r.reduction),
+  totalAmount: num(r.total_amount),
+  tvaAmount: num(r.tva_amount),
+  finalAmount: num(r.final_amount),
+  paidAmount: num(r.paid_amount),
+  restAmount: num(r.rest_amount),
+  paymentMode: r.payment_mode ?? undefined,
+  notes: r.notes ?? '',
+  createdAt: r.created_at,
+  createdBy: r.created_by ?? undefined,
+  lines: [...(r.free_invoice_lines ?? [])]
+    .sort((a: any, b: any) => (a.position ?? 0) - (b.position ?? 0))
+    .map((l: any) => ({
+      ficheTechnicId: l.fiche_technic_id ?? undefined,
+      productName: l.product_name,
+      description: l.description ?? '',
+      quantity: num(l.quantity),
+      unit: l.unit ?? undefined,
+      unitPrice: num(l.unit_price),
+      totalPrice: num(l.total_price),
+    })),
 });
 
 const toPurchaseOrder = (r: any): PurchaseOrder => ({
@@ -406,6 +492,7 @@ const toSale = (r: any): Sale => ({
   paidAmount: num(r.paid_amount),
   restAmount: num(r.rest_amount),
   allocatedAmount: num(r.allocated_amount),
+  refundedAmount: num(r.refunded_amount),
   status: r.status,
   createdBy: r.created_by ?? undefined,
   products: (r.sale_lines ?? []).map((l: any) => ({
@@ -446,7 +533,9 @@ const toProduction = (r: any): Production => ({
   lossQuantity: num(r.loss_quantity),
   lossDescription: r.loss_description ?? undefined,
   lossValue: num(r.loss_value),
-  origin: (r.origin === 'pos' ? 'pos' : 'manual') as 'manual' | 'pos',
+  origin: (r.origin === 'pos' ? 'pos' : r.origin === 'delivery' ? 'delivery' : 'manual') as Production['origin'],
+  ficheTechnicId: r.fiche_technic_id ?? undefined,
+  deliveryId: r.delivery_id ?? undefined,
   saleId: r.sale_id ?? undefined,
   saleReference: r.sale_reference ?? undefined,
   createdBy: r.created_by ?? undefined,
@@ -646,6 +735,7 @@ const toFiche = (r: any): FicheTechnic => ({
   totalValue: num(r.total_value),
   gainsPerUnit: num(r.gains_per_unit),
   totalGains: num(r.total_gains),
+  imageUrl: r.image_url ?? undefined,
   createdAt: (r.created_at ?? '').slice(0, 10),
   usedProducts: (r.fiche_technic_lines ?? []).map((l: any) => ({
     productId: l.product_id ?? '',
@@ -863,6 +953,21 @@ export const db = {
         ).map(toCommandDelivery);
       }
     },
+  },
+
+  // /livraisons — récupérations de marchandise sur un bon
+  deliveryRecoveries: {
+    list: async (): Promise<DeliveryRecovery[]> =>
+      (await selectOptional<any>('delivery_recoveries', '*, delivery_recovery_items(*)', 'recovered_at'))
+        .map(toDeliveryRecovery),
+    remove: (id: string) => remove('delivery_recoveries', id),
+  },
+
+  // /factures-non-comptabilisees
+  freeInvoices: {
+    list: async (): Promise<FreeInvoice[]> =>
+      (await selectOptional<any>('free_invoices', '*, free_invoice_lines(*)', 'created_at')).map(toFreeInvoice),
+    remove: (id: string) => remove('free_invoices', id),
   },
 
   // /commands — annulations du reste et augmentations
@@ -1230,6 +1335,19 @@ export const rpc = {
   updateCommandDelivery: (id: string, payload: Record<string, any>) =>
     call<any>('update_command_delivery', { p_id: id, p_payload: payload }),
   deleteCommandDelivery: (id: string) => call<void>('delete_command_delivery', { p_id: id }),
+
+  // /livraisons — client → produit → quantité (un bon par commande touchée)
+  createClientDelivery: (payload: Record<string, any>) =>
+    call<any[]>('create_client_delivery', { p_payload: payload }),
+  updateClientDelivery: (id: string, payload: Record<string, any>) =>
+    call<any>('update_client_delivery', { p_id: id, p_payload: payload }),
+  /** Récupère la marchandise d'un bon : stock prêt, facture et argent du client. */
+  createDeliveryRecovery: (payload: Record<string, any>) =>
+    call<any>('create_delivery_recovery', { p_payload: payload }),
+
+  // /factures-non-comptabilisees — création (id null) ou modification
+  saveFreeInvoice: (id: string | null, payload: Record<string, any>) =>
+    call<any>('save_free_invoice', { p_id: id, p_payload: payload }),
 
   // /workers — heures supplémentaires
   addWorkerOvertime: (payload: Record<string, any>) =>

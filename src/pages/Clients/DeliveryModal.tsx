@@ -12,7 +12,10 @@ import { stockRequirementsForDelivery } from '@/lib/ficheStock';
 import { useFicheTechnicStore } from '@/store/ficheTechnicStore';
 import { useStockStore } from '@/store/stockStore';
 import { useCommandStore } from '@/store/commandStore';
-import { lineTotal } from '@/lib/commandBilling';
+import { useProductionStore } from '@/store/productionStore';
+import { useSalesStore } from '@/store/salesStore';
+import { lineTotal, deliveryPaymentSplit } from '@/lib/commandBilling';
+import { readyByFiche } from '@/lib/readyStock';
 import { toast } from '@/components/ui/Toast';
 import type { Command, DeliveryDriver, DeliveryPayment } from '@/store/commandStore';
 import type { CommandDelivery, CommandDeliveryItem } from '@/types';
@@ -67,6 +70,15 @@ export function DeliveryModal({
   const ficheTechnics = useFicheTechnicStore((s) => s.ficheTechnics);
   const products = useStockStore((s) => s.products);
   const updateCommand = useCommandStore((s) => s.updateCommand);
+  const productions = useProductionStore((s) => s.productions);
+  const allDeliveries = useCommandStore((s) => s.deliveries);
+  const recoveries = useCommandStore((s) => s.recoveries);
+  const sales = useSalesStore((s) => s.sales);
+  /** Argent du compte du client qui payait le bon modifié : il lui revient avant d'être réimputé. */
+  const editingSplit = useMemo(
+    () => deliveryPaymentSplit(editing ? sales.find((s) => s.id === editing.saleId) : undefined),
+    [editing, sales]
+  );
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   /** Prix unitaire de chaque ligne — modifiable ; un prix change met a jour la commande. */
   const [prices, setPrices] = useState<Record<string, number>>({});
@@ -133,7 +145,8 @@ export function DeliveryModal({
     setTvaRate(
       (editing?.tvaRate || command.tvaRate || DEFAULT_TVA_RATE) as number
     );
-    setCashPaid(editing?.cashPaid ?? 0);
+    // l'encaissement reste encaissé, l'argent du compte du client reste imputé
+    setCashPaid(editing ? editingSplit.cash : 0);
     // L'ACOMPTE DE LA COMMANDE EST IMPUTE D'OFFICE SUR LE BON.
     //
     // C'etait la cause du bug « toutes mes ventes affichent une dette alors
@@ -145,7 +158,8 @@ export function DeliveryModal({
     // l'operateur peut toujours le reduire s'il ne veut pas l'imputer ici.
     setAdvanceApplied(editing ? (editing.advanceApplied ?? 0) : -1);
     // l'acompte libre du client est propose d'office sur un NOUVEAU bon
-    setCreditApplied(editing ? 0 : -1);
+    setCreditApplied(editing ? editingSplit.credit : -1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, command, editing]);
 
   /** Coche « même chauffeur » → on recopie celui de la commande. */
@@ -180,23 +194,48 @@ export function DeliveryModal({
   }, [command, quantities, prices, editing]);
 
   /**
-   * Matières premières qui vont réellement quitter « Gestion de stock » quand
-   * cette livraison sera validée. La commande, elle, n'a rien entamé : chaque
-   * recette est dépliée au prorata de la quantité livrée maintenant.
+   * STOCK PRÊT puis PRODUCTION AUTOMATIQUE.
+   * Le produit fini sort d'abord du stock prêt ; ce qui manque est produit
+   * au moment de valider (production rattachée au bon) et ce sont ses
+   * matières premières qui quittent « Gestion de stock ».
    * (Le calcul est refait — et appliqué — par la base de données.)
    */
-  const requirements = useMemo(() => {
-    const lines = rows
+  const readyPlan = useMemo(() => {
+    const ready = readyByFiche(productions, allDeliveries, recoveries);
+    // en modification, ce que le bon avait pris dans le stock prêt y revient
+    editing?.items.forEach((it) => {
+      if (it.readyApplied && it.ficheTechnicId) {
+        ready.set(it.ficheTechnicId, (ready.get(it.ficheTechnicId) ?? 0) + (it.fromReady ?? 0));
+      }
+    });
+    return rows
       .filter((r) => r.now > 0)
-      .map((r) => ({
-        ficheTechnicId: r.item.ficheTechnicId,
-        productId: r.item.productId,
-        productName: r.item.productName,
-        quantity: r.now,
+      .map((r) => {
+        // comme la base : seule une ligne rattachée à sa fiche technique passe par le stock prêt
+        const fiche = r.item.ficheTechnicId ? ficheTechnics.find((f) => f.id === r.item.ficheTechnicId) : undefined;
+        if (!fiche || isHistorical) {
+          return { row: r, ficheId: undefined as string | undefined, fromReady: 0, toProduce: 0 };
+        }
+        const avail = Math.max(0, ready.get(fiche.id) ?? 0);
+        const fromReady = Math.min(r.now, avail);
+        ready.set(fiche.id, avail - fromReady);
+        return { row: r, ficheId: fiche.id, fromReady, toProduce: Math.round((r.now - fromReady) * 1000) / 1000 };
+      });
+  }, [rows, productions, allDeliveries, recoveries, editing, ficheTechnics, isHistorical]);
+
+  /** Matières premières de la part produite automatiquement. */
+  const requirements = useMemo(() => {
+    const lines = readyPlan
+      .filter((p) => p.ficheId && p.toProduce > 0.0005)
+      .map((p) => ({
+        ficheTechnicId: p.ficheId,
+        productId: p.row.item.productId,
+        productName: p.row.item.productName,
+        quantity: p.toProduce,
       }));
     if (!lines.length) return [];
     return stockRequirementsForDelivery(lines, ficheTechnics, products);
-  }, [rows, ficheTechnics, products]);
+  }, [readyPlan, ficheTechnics, products]);
 
   const requirementsCost = requirements.reduce((s, r) => s + r.lineCost, 0);
   const shortages = requirements.filter((r) => r.shortage);
@@ -212,7 +251,13 @@ export function DeliveryModal({
    *  LA LIVRAISON EST UNE VENTE : valeur HT → TVA → net à payer → reste dû.
    * --------------------------------------------------------------------- */
   const tvaAmount = tvaEnabled ? Math.round(amountNow * tvaRate) / 100 : 0;
-  const totalTtc = amountNow + tvaAmount;
+  // marchandise déjà récupérée sur le bon modifié : la facture ne la compte
+  // plus et l'argent déjà rendu au client ne la paie plus
+  const recoveredTtc = editing
+    ? recoveries.filter((r) => r.deliveryId === editing.id).reduce((s, r) => s + r.totalTtc, 0)
+    : 0;
+  const refunded = editing ? (sales.find((s) => s.id === editing.saleId)?.refundedAmount ?? 0) : 0;
+  const totalTtc = Math.max(0, amountNow + tvaAmount - recoveredTtc + refunded);
   /** Acompte imputable : ce qui reste de l'acompte, plafonné par la facture. */
   const maxAdvance = Math.max(0, Math.min(advanceAvailable, totalTtc));
   /**
@@ -224,14 +269,14 @@ export function DeliveryModal({
     ? maxAdvance
     : Math.max(0, Math.min(advanceApplied, maxAdvance));
   /** Acompte libre du client : il paie ce que l'acompte de la commande ne couvre pas. */
-  const maxCredit = Math.max(0, Math.min(clientCredit, totalTtc - advanceUsed));
+  const maxCredit = Math.max(0, Math.min(clientCredit + (editing ? editingSplit.credit : 0), totalTtc - advanceUsed));
   const creditUsed = creditApplied < 0
     ? maxCredit
     : Math.max(0, Math.min(creditApplied, maxCredit));
   const maxCash = Math.max(0, totalTtc - advanceUsed - creditUsed);
   const cashUsed = Math.max(0, Math.min(cashPaid, maxCash));
-  const paidTotal = advanceUsed + creditUsed + cashUsed;
-  const restToPay = Math.max(0, totalTtc - paidTotal);
+  const paidTotal = Math.max(0, advanceUsed + creditUsed + cashUsed - refunded);
+  const restToPay = Math.max(0, totalTtc - refunded - paidTotal);
 
   const handleSave = async () => {
     if (!command) return;
@@ -476,7 +521,7 @@ export function DeliveryModal({
           <div className="rounded-2xl border border-gold/20 bg-vanilla/30 overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gold/15 bg-gold/8 px-4 py-2.5">
               <p className="text-xs font-bold uppercase tracking-wider text-gold-dark flex items-center gap-2">
-                <Package size={14} /> Matières déduites du stock par cette livraison
+                <Package size={14} /> Stock prêt &amp; production automatique
               </p>
               {requirements.length > 0 && (
                 <span className="text-xs font-bold tabular text-gold-dark">
@@ -485,16 +530,29 @@ export function DeliveryModal({
               )}
             </div>
 
+            {readyPlan.some((p) => p.ficheId) && (
+              <div className="space-y-1 px-4 pt-3">
+                {readyPlan.filter((p) => p.ficheId).map((p) => {
+                  const u = p.row.item.sellUnit ? ` ${p.row.item.sellUnit}` : '';
+                  return (
+                    <p key={p.row.key} className={`text-xs font-semibold ${p.toProduce > 0 ? 'text-caramel' : 'text-pistachio'}`}>
+                      {p.row.item.productName} : {p.fromReady}{u} du stock prêt
+                      {p.toProduce > 0 ? ` + ${p.toProduce}${u} produits automatiquement (stock prêt insuffisant)` : ''}
+                    </p>
+                  );
+                })}
+              </div>
+            )}
             {requirements.length === 0 ? (
               <p className="px-4 py-3 text-xs italic text-text-muted">
-                Aucune matière à déduire : saisissez une quantité à livrer, ou les produits de cette
-                commande ne sont rattachés à aucune fiche technique ni à un produit du stock.
+                Aucune matière à déduire : le stock prêt couvre cette livraison, ou les produits de cette
+                commande ne sont rattachés à aucune fiche technique.
               </p>
             ) : (
               <>
                 <p className="px-4 pt-3 text-[11px] italic text-text-muted">
-                  La commande n'entame pas le stock. Ces quantités seront retirées de « Gestion de
-                  stock » au moment où vous validez la livraison, au prorata des quantités remises.
+                  La différence sera produite au moment de valider (production rattachée à ce bon) : ces
+                  matières seront retirées de « Gestion de stock ».
                 </p>
                 <div className="overflow-x-auto px-2 pb-2">
                   <table className="w-full text-xs">
@@ -635,7 +693,7 @@ export function DeliveryModal({
                       <PiggyBank size={13} className="text-pistachio" />
                       Acompte du client à utiliser
                       <span className="text-text-muted font-normal">
-                        (disponible {formatCurrency(clientCredit)})
+                        (disponible {formatCurrency(clientCredit + (editing ? editingSplit.credit : 0))})
                       </span>
                     </label>
                     <div className="flex gap-1.5">
@@ -709,7 +767,7 @@ export function DeliveryModal({
                   value={formatCurrency(tvaAmount)}
                   accent={tvaEnabled ? 'text-gold-dark' : 'text-text-muted'}
                 />
-                <Money label="Net à payer T.T.C" value={formatCurrency(totalTtc)} accent="text-gold-dark" />
+                <Money label="Net à payer T.T.C" value={formatCurrency(Math.max(0, totalTtc - refunded))} accent="text-gold-dark" />
                 <Money label="Versement" value={formatCurrency(paidTotal)} accent="text-pistachio" />
                 <Money
                   label="Reste (dette client)"

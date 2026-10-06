@@ -12,6 +12,7 @@ import { useExpenseStore } from '@/store/expenseStore';
 import { useCaisseStore } from '@/store/caisseStore';
 import { useCaisseReportStore } from '@/store/caisseReportStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useFreeInvoiceStore } from '@/store/freeInvoiceStore';
 
 /**
  * Loads every screen from Supabase.
@@ -69,6 +70,7 @@ async function runHydration(): Promise<{ ok: boolean; failed: string[] }> {
     step('caisse', () => useCaisseStore.getState().load()),
     step('rapports de caisse', () => useCaisseReportStore.getState().load()),
     step('paramètres', () => useSettingsStore.getState().load()),
+    step('factures non comptabilisées', () => useFreeInvoiceStore.getState().load()),
   ]);
 
   return { ok: failed.length === 0, failed };

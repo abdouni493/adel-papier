@@ -144,3 +144,21 @@ export function clientCommandSummary(
   });
   return { advance: Math.round(advance * 100) / 100, pending: Math.round(pending * 100) / 100, pendingCount };
 }
+
+/**
+ * Répartition de l'argent porté par la facture d'un bon de livraison :
+ *  · `cash`   — encaissé à la remise ou en règlement de dette (caisse) ;
+ *  · `credit` — payé par le compte du client (acompte, versement imputé) : à
+ *    la modification du bon, cet argent redevient son acompte puis est réimputé ;
+ *  · `advance` — acompte de la commande imputé sur le bon.
+ */
+export function deliveryPaymentSplit(sale?: Sale): { cash: number; credit: number; advance: number } {
+  let cash = 0; let credit = 0; let advance = 0;
+  (sale?.payments ?? []).forEach((p) => {
+    if (p.origin === 'command_advance') advance += p.amount;
+    else if (p.origin === 'credit' || p.origin === 'client_payment') credit += p.amount;
+    else cash += p.amount;
+  });
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return { cash: r2(cash), credit: r2(credit), advance: r2(advance) };
+}

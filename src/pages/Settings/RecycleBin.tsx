@@ -30,6 +30,8 @@ const TABLE_LABELS: Record<string, string> = {
   caisse_transactions: 'Opération de caisse', caisse_categories: 'Catégorie de caisse',
   caisse_reports: 'Rapport de caisse', document_titles: 'Titre de document',
   stock_movements: 'Mouvement de stock',
+  delivery_recoveries: 'Récupération de livraison', delivery_recovery_items: 'Ligne de récupération',
+  free_invoices: 'Facture non comptabilisée', free_invoice_lines: 'Ligne de facture non comptabilisée',
 };
 const tableLabel = (t: string) => TABLE_LABELS[t] ?? t;
 
@@ -66,6 +68,7 @@ const DETAIL = new Set([
   'command_items', 'sale_lines', 'purchase_lines', 'purchase_order_items', 'fiche_technic_lines',
   'command_delivery_items', 'command_delivery_consumptions', 'command_adjustment_lines',
   'production_used_products', 'stock_movements', 'caisse_transactions',
+  'delivery_recovery_items', 'free_invoice_lines',
 ]);
 
 export function RecycleBin() {

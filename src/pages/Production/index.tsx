@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   FlaskConical, Plus, Eye, Trash2, Search, X, Clock, User, Pencil, FileText,
   BookOpen, AlertTriangle, Printer, Factory, Coins, TrendingUp, PackageCheck,
-  CreditCard, Receipt,
+  CreditCard, Receipt, Truck, ImagePlus, Tags,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SearchBar } from '@/components/ui/SearchBar';
@@ -22,6 +22,10 @@ import { UnitSelect } from '@/components/shared/UnitSelect';
 import { StatCard } from '@/components/shared/StatCard';
 import { useSettingsStore } from '@/store/settingsStore';
 import { printProductionSheet } from '@/lib/documents';
+import { uploadImage } from '@/lib/storage';
+import { readyByFiche } from '@/lib/readyStock';
+import { useCommandStore } from '@/store/commandStore';
+import { PriceListDialog } from './PriceListDialog';
 import { motion } from 'framer-motion';
 import { useProductionStore } from '@/store/productionStore';
 import { useFicheTechnicStore, type FicheTechnic } from '@/store/ficheTechnicStore';
@@ -38,6 +42,14 @@ export default function ProductionPage() {
   const { productions, addProduction, deleteProduction } = useProductionStore();
   const { ficheTechnics, deleteFicheTechnic } = useFicheTechnicStore();
   const settings = useSettingsStore((s) => s.settings);
+  const deliveries = useCommandStore((s) => s.deliveries);
+  const recoveries = useCommandStore((s) => s.recoveries);
+  /** Stock prêt de chaque produit : produit fini pas encore livré ni mis au comptoir. */
+  const readyMap = useMemo(
+    () => readyByFiche(productions, deliveries, recoveries),
+    [productions, deliveries, recoveries]
+  );
+  const [priceListOpen, setPriceListOpen] = useState(false);
 
   /** Imprime la fiche complète d'une production (matières, résultat, gains). */
   const printProduction = (prod: Production) =>
@@ -75,13 +87,12 @@ export default function ProductionPage() {
   const prodStats = useMemo(() => {
     const cost = productions.reduce((sum, x) => sum + (x.totalCost ?? 0), 0);
     const value = productions.reduce((sum, x) => sum + x.totalValue, 0);
-    const remaining = productions.reduce(
-      (sum, x) => sum + (x.outputQuantity - (x.sentToComptoir ?? 0)),
-      0
-    );
+    // stock prêt : produit fini ni livré ni mis au comptoir (tous produits)
+    let remaining = 0;
+    readyMap.forEach((v) => { remaining += Math.max(0, v); });
     const loss = productions.reduce((sum, x) => sum + (x.lossValue ?? 0), 0);
     return { cost, value, remaining, loss, gains: value - cost };
-  }, [productions]);
+  }, [productions, readyMap]);
 
   const [activeTab, setActiveTab] = useState<'productions' | 'fiche_technics'>('productions');
   const [search, setSearch] = useState('');
@@ -89,7 +100,7 @@ export default function ProductionPage() {
   // manuelle (écran Production) ou lancée depuis le point de vente
   // Affichage en TABLEAU par defaut, comme sur tous les ecrans.
   const [view, setView] = useViewMode('production');
-  const [originFilter, setOriginFilter] = useState<'all' | 'manual' | 'pos'>('all');
+  const [originFilter, setOriginFilter] = useState<'all' | 'manual' | 'pos' | 'delivery'>('all');
   
   // Production Modals
   const [prodCreateOpen, setProdCreateOpen] = useState(false);
@@ -137,6 +148,7 @@ export default function ProductionPage() {
         <span className="flex items-center gap-1.5 font-semibold">
           {p.name}
           {p.origin === 'pos' && <Badge variant="success" className="text-[9px]">Caisse</Badge>}
+          {p.origin === 'delivery' && <Badge variant="warning" className="text-[9px]">Livraison</Badge>}
           {p.hasLoss && <Badge variant="danger" className="text-[9px]">Perte</Badge>}
         </span>
       ) },
@@ -156,13 +168,25 @@ export default function ProductionPage() {
       } },
   ];
 
+  /**
+   * Ce qui peut encore partir au comptoir : le reste du lot, plafonné par le
+   * stock prêt du produit (une partie a pu être livrée entre-temps).
+   */
+  const transferableOf = (p: Production) => {
+    const rest = p.outputQuantity - (p.sentToComptoir ?? 0);
+    if (p.origin === 'pos' || !p.ficheTechnicId) return Math.max(0, rest);
+    return Math.max(0, Math.min(rest, readyMap.get(p.ficheTechnicId) ?? 0));
+  };
+
   const productionActions = (p: Production): ActionItem[] => [
     { label: 'Détails', icon: <Eye size={15} />, onClick: () => setProdViewing(p) },
     { label: 'Mettre au comptoir', icon: <Plus size={15} />,
-      hidden: !can('production', 'edit') || p.outputQuantity - (p.sentToComptoir ?? 0) <= 0,
+      hidden: !can('production', 'edit') || transferableOf(p) <= 0,
       onClick: () => setTransferProd(p) },
     { label: 'Imprimer la fiche', icon: <Printer size={15} />, onClick: () => printProduction(p) },
-    { label: 'Supprimer', icon: <Trash2 size={15} />, danger: true, hidden: !can('production', 'delete'),
+    { label: 'Supprimer', icon: <Trash2 size={15} />, danger: true,
+      // une production automatique appartient à son bon de livraison
+      hidden: !can('production', 'delete') || p.origin === 'delivery',
       onClick: () => setProdDeleteId(p.id) },
   ];
 
@@ -181,11 +205,16 @@ export default function ProductionPage() {
                 </Button>
               )
             ) : (
-              can('production', 'create') && (
-                <Button variant="gold" onClick={() => setFtCreateOpen(true)}>
-                  <Plus size={18} /> Nouvelle Fiche Technique
+              <>
+                <Button variant="secondary" onClick={() => setPriceListOpen(true)} disabled={ficheTechnics.length === 0}>
+                  <Tags size={18} /> Imprimer la liste des prix
                 </Button>
-              )
+                {can('production', 'create') && (
+                  <Button variant="gold" onClick={() => setFtCreateOpen(true)}>
+                    <Plus size={18} /> Nouvelle Fiche Technique
+                  </Button>
+                )}
+              </>
             )}
           </div>
         }
@@ -223,7 +252,7 @@ export default function ProductionPage() {
             <StatCard label="Valeur produite" value={prodStats.value} format="currency" icon={<Factory size={22} />} index={0} accent="gold" />
             <StatCard label="Coût des matières" value={prodStats.cost} format="currency" icon={<Coins size={22} />} index={1} accent="rose" />
             <StatCard label="Gains estimés" value={prodStats.gains} format="currency" icon={<TrendingUp size={22} />} index={2} accent="pistachio" />
-            <StatCard label="Reste à envoyer au comptoir" value={prodStats.remaining} icon={<PackageCheck size={22} />} index={3} accent="caramel" />
+            <StatCard label="Stock prêt (non livré)" value={prodStats.remaining} icon={<PackageCheck size={22} />} index={3} accent="caramel" />
           </div>
 
           <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -232,11 +261,12 @@ export default function ProductionPage() {
               options={[{ value: 'all', label: t('all') }, { value: 'today', label: t('today') }, { value: 'week', label: t('week') }, { value: 'month', label: t('month') }]} className="max-w-[180px]" />
             <Select
               value={originFilter}
-              onChange={(e) => setOriginFilter(e.target.value as 'all' | 'manual' | 'pos')}
+              onChange={(e) => setOriginFilter(e.target.value as 'all' | 'manual' | 'pos' | 'delivery')}
               options={[
                 { value: 'all', label: 'Toutes les origines' },
                 { value: 'manual', label: 'Lancées manuellement' },
                 { value: 'pos', label: `Issues du point de vente (${posCount})` },
+                { value: 'delivery', label: `Automatiques (livraisons) (${productions.filter((p) => p.origin === 'delivery').length})` },
               ]}
               className="max-w-[240px]"
             />
@@ -273,6 +303,9 @@ export default function ProductionPage() {
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       {p.origin === 'pos' && (
                         <Badge variant="success" className="gap-1"><CreditCard size={10} /> Point de vente</Badge>
+                      )}
+                      {p.origin === 'delivery' && (
+                        <Badge variant="warning" className="gap-1"><Truck size={10} /> Auto · livraison</Badge>
                       )}
                       {p.categoryName && <Badge variant="info">{p.categoryName}</Badge>}
                       {p.hasLoss && (
@@ -360,14 +393,14 @@ export default function ProductionPage() {
                       </p>
                     )}
 
-                    {p.outputQuantity - (p.sentToComptoir ?? 0) > 0 && can('production', 'edit') && (
+                    {transferableOf(p) > 0 && can('production', 'edit') && (
                       <Button
                         size="sm"
                         variant="gold"
                         className="w-full text-xs mb-2"
                         onClick={() => setTransferProd(p)}
                       >
-                        <Plus size={13} /> Mettre au comptoir ({p.outputQuantity - (p.sentToComptoir ?? 0)})
+                        <Plus size={13} /> Mettre au comptoir ({transferableOf(p)})
                       </Button>
                     )}
 
@@ -378,7 +411,7 @@ export default function ProductionPage() {
                       <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={() => printProduction(p)}>
                         <Printer size={13} /> Imprimer
                       </Button>
-                      {can('production', 'delete') && (
+                      {can('production', 'delete') && p.origin !== 'delivery' && (
                         <Button size="sm" variant="ghost" onClick={() => setProdDeleteId(p.id)} title="Supprimer">
                           <Trash2 size={13} className="text-rose-deep" />
                         </Button>
@@ -400,6 +433,9 @@ export default function ProductionPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredFicheTechnics.map((ft, i) => (
                 <Card key={ft.id} index={i} hoverable className="flex flex-col border border-gold/10 hover:border-gold/30 bg-gradient-to-br from-white to-vanilla/5">
+                  {ft.imageUrl && (
+                    <img src={ft.imageUrl} alt={ft.name} className="-mx-5 -mt-5 mb-3 h-36 w-[calc(100%+2.5rem)] max-w-none object-cover rounded-t-xl border-b border-gold/10" />
+                  )}
                   <div className="flex justify-between items-start mb-1 gap-2">
                     <h3 className="font-display font-semibold text-text-primary text-base">{ft.name}</h3>
                     <Badge variant="warning" className="bg-caramel/10 text-caramel border-0">{ft.categoryName}</Badge>
@@ -408,6 +444,7 @@ export default function ProductionPage() {
                   {ft.description && <p className="text-xs text-text-muted mb-3 line-clamp-2">{ft.description}</p>}
                   
                   <div className="bg-vanilla/40 rounded-xl p-3 space-y-1.5 text-xs mb-3">
+                    <div className="flex justify-between"><span className="text-text-muted">Stock prêt (non livré)</span><span className="tabular font-bold text-pistachio">{Math.max(0, readyMap.get(ft.id) ?? 0)}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span></div>
                     <div className="flex justify-between"><span className="text-text-muted">Ingrédients</span><span className="tabular text-text-secondary">{ft.usedProducts.length}</span></div>
                     <div className="flex justify-between"><span className="text-text-muted">Rendement base</span><span className="tabular font-medium text-text-primary">{ft.outputQuantity}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span></div>
                     <div className="flex justify-between"><span className="text-text-muted">Coût base total</span><span className="tabular text-rose-deep font-semibold">{formatCurrency(ft.totalCost)}</span></div>
@@ -566,6 +603,9 @@ export default function ProductionPage() {
                 {ftViewing.usableInProduction && <Badge variant="info" className="bg-caramel/15 text-caramel border-0">Réutilisable en production{ftViewing.productUnit ? ` (${ftViewing.productUnit})` : ''}</Badge>}
               </div>
             </div>
+            {ftViewing.imageUrl && (
+              <img src={ftViewing.imageUrl} alt={ftViewing.name} className="w-full max-h-64 object-contain rounded-xl border border-gold/15 bg-vanilla/30" />
+            )}
             {ftViewing.description && <p className="text-sm text-text-secondary bg-vanilla/20 p-2.5 rounded-xl border border-gold/5 italic">« {ftViewing.description} »</p>}
             
             <div>
@@ -630,11 +670,14 @@ export default function ProductionPage() {
       <ConfirmDialog open={!!ftDeleteId} onClose={() => setFtDeleteId(null)}
         onConfirm={() => { if (ftDeleteId) void deleteFicheTechnic(ftDeleteId).then(() => toast.success('Fiche technique supprimée')); }} />
 
+      <PriceListDialog open={priceListOpen} onClose={() => setPriceListOpen(false)} />
+
       {/* Transfer to Comptoir Modal */}
       <Modal open={!!transferProd} onClose={() => setTransferProd(null)} title="Mettre au comptoir" size="sm">
         {transferProd && (
           <TransferToComptoirModal
             production={transferProd}
+            maxQuantity={transferableOf(transferProd)}
             onClose={() => setTransferProd(null)}
           />
         )}
@@ -643,10 +686,13 @@ export default function ProductionPage() {
   );
 }
 
-function TransferToComptoirModal({ production, onClose }: { production: Production; onClose: () => void }) {
+function TransferToComptoirModal({ production, maxQuantity, onClose }: {
+  production: Production; maxQuantity: number; onClose: () => void;
+}) {
   const { t } = useLanguage();
   const { transferToComptoir } = useProductionStore();
-  const remainingQty = production.outputQuantity - (production.sentToComptoir ?? 0);
+  // le reste du lot, plafonné par le stock prêt (une partie a pu être livrée)
+  const remainingQty = Math.max(0, Math.min(production.outputQuantity - (production.sentToComptoir ?? 0), maxQuantity));
   
   const [quantity, setQuantity] = useState<number>(remainingQty);
   
@@ -774,6 +820,23 @@ function FicheTechnicForm({ initial, onClose }: { initial?: FicheTechnic; onClos
   // New: allow this product to be reused as an ingredient in another fiche.
   const [usableInProduction, setUsableInProduction] = useState(!!initial?.usableInProduction);
   const [productUnit, setProductUnit] = useState(initial?.productUnit ?? '');
+  /** Photo du produit — reprise sur la liste des prix et le tableau de bord. */
+  const [imageUrl, setImageUrl] = useState(initial?.imageUrl ?? '');
+  const [uploading, setUploading] = useState(false);
+
+  const handleImage = async (file?: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.error('Choisissez une image (PNG, JPG, WEBP)'); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error("L'image dépasse 5 Mo"); return; }
+    setUploading(true);
+    try {
+      setImageUrl(await uploadImage('product-images', file, 'fiches'));
+    } catch {
+      toast.error("Impossible d'envoyer l'image");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // Category mini-modal
   const [catModal, setCatModal] = useState(false);
@@ -921,6 +984,7 @@ function FicheTechnicForm({ initial, onClose }: { initial?: FicheTechnic; onClos
       totalValue,
       gainsPerUnit,
       totalGains,
+      imageUrl: imageUrl || undefined,
     };
 
     setSavingFiche(true);
@@ -956,6 +1020,35 @@ function FicheTechnicForm({ initial, onClose }: { initial?: FicheTechnic; onClos
           </div>
 
           <Textarea label="Description / Procédé (Optionnel)" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Détaillez le procédé de fabrication..." />
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-text-secondary mb-1.5">Image du produit (Optionnel)</label>
+            <div className="flex items-center gap-3">
+              <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl border-2 border-dashed border-gold/30 bg-vanilla/40 flex items-center justify-center">
+                {imageUrl
+                  ? <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+                  : <ImagePlus size={24} className="text-text-muted" />}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-[--border-input] bg-chocolate px-3 h-9 text-xs font-semibold text-text-primary hover:border-gold/60 hover:text-gold">
+                  <ImagePlus size={14} /> {uploading ? 'Envoi…' : imageUrl ? "Changer l'image" : 'Choisir une image'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    disabled={uploading}
+                    onChange={(e) => { void handleImage(e.target.files?.[0]); e.target.value = ''; }}
+                  />
+                </label>
+                {imageUrl && (
+                  <button type="button" onClick={() => setImageUrl('')} className="text-left text-[11px] font-semibold text-rose-deep hover:underline">
+                    Retirer l'image
+                  </button>
+                )}
+                <p className="text-[10px] text-text-muted">PNG, JPG ou WEBP — 5 Mo au plus.</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Output card */}
@@ -1109,7 +1202,7 @@ function FicheTechnicForm({ initial, onClose }: { initial?: FicheTechnic; onClos
 
       <div className="flex justify-end gap-3 border-t border-gold/5 pt-4">
         <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-        <Button variant="gold" onClick={handleSave} disabled={savingFiche}>
+        <Button variant="gold" onClick={handleSave} disabled={savingFiche || uploading}>
           {savingFiche ? 'Enregistrement…' : initial ? 'Mettre à jour' : 'Créer la Fiche'}
         </Button>
       </div>
@@ -1290,6 +1383,8 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
       hour: nowTime(),
       categoryId: selectedFt.categoryId,
       categoryName: selectedFt.categoryName,
+      // la quantité produite rejoint le STOCK PRÊT de ce produit
+      ficheTechnicId: selectedFt.id,
       usedProducts: scaledUsedProducts.map((u) => ({
         productId: u.productId,
         productName: u.productName,

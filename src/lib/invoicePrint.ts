@@ -85,6 +85,12 @@ export interface SaleInvoiceData {
   paid: number;
   rest: number;
   createdBy?: string;
+  /** Titre imprimé (défaut : « FACTURE DE VENTE »). */
+  docTitle?: string;
+  /** Texte libre imprimé tout en bas du document. */
+  endText?: string;
+  /** Observations encadrées sous le tableau. */
+  observations?: string;
 }
 
 // ------------------------------------------------------------------ helpers --
@@ -247,7 +253,9 @@ export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
 
   printOfficialDocument(
     {
-      title: data.tvaEnabled ? 'FACTURE DE VENTE (T.T.C)' : 'FACTURE DE VENTE',
+      title: (data.docTitle?.trim() || (data.tvaEnabled ? 'FACTURE DE VENTE (T.T.C)' : 'FACTURE DE VENTE')).toUpperCase(),
+      endText: data.endText,
+      observations: data.observations,
       docDate: data.date,
       doitName: data.client.name,
       doitLines: [

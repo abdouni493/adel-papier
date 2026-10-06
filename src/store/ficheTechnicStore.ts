@@ -21,6 +21,8 @@ export interface FicheTechnic {
   totalValue: number;
   gainsPerUnit: number;
   totalGains: number;
+  /** Photo du produit (bucket « product-images ») — reprise sur la liste des prix. */
+  imageUrl?: string;
   createdAt: string;
 }
 
@@ -40,6 +42,7 @@ const toPayload = (d: Partial<FicheTechnic>) => ({
   total_value: d.totalValue ?? 0,
   gains_per_unit: d.gainsPerUnit ?? 0,
   total_gains: d.totalGains ?? 0,
+  image_url: d.imageUrl ?? '',
   used_products: (d.usedProducts ?? []).map((u) => ({
     product_id: u.productId || null,
     product_name: u.productName,

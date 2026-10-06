@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Wallet, Package, ShoppingCart, Factory, AlertTriangle, CreditCard, TrendingUp,
   TrendingDown, Users, Truck, Banknote, Clock, HardHat, Bell, BellRing, ArrowRight,
-  CheckCircle2, Receipt, Coins, PackageCheck, Boxes, Timer, X, Activity, Layers,
+  CheckCircle2, Receipt, Coins, PackageCheck, Boxes, Timer, X, Activity,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid,
@@ -27,7 +27,10 @@ import { useSupplierStore } from '@/store/supplierStore';
 import { useWorkerStore } from '@/store/workerStore';
 import { useCommandStore, deliveryStatus } from '@/store/commandStore';
 import { useCaisseStore } from '@/store/caisseStore';
+import { useFicheTechnicStore } from '@/store/ficheTechnicStore';
 import { formatCurrency, formatDate, formatNumber, daysUntil, getMonthLabel } from '@/lib/utils';
+import { readyByFiche, ficheOrderStats } from '@/lib/readyStock';
+import { ProductOrderCards } from '@/components/shared/ProductOrderCards';
 import { caisseBalance as computeCaisseBalance, caisseBreakdown } from '@/lib/finance';
 import { buildClientAccounts, buildSupplierAccounts, sumAccounts } from '@/lib/accounts';
 
@@ -63,6 +66,15 @@ export default function Dashboard() {
   const supplierOldDebts = useSupplierStore((s) => s.oldDebts);
   const transactions = useCaisseStore((s) => s.transactions);
   const initialBalance = useCaisseStore((s) => s.initialBalance);
+  const ficheTechnics = useFicheTechnicStore((s) => s.ficheTechnics);
+  const recoveries = useCommandStore((s) => s.recoveries);
+
+  /* Suivi des commandes par produit : commandé, livré, reste à livrer et
+     stock prêt — le reste baisse à chaque livraison. */
+  const productStats = useMemo(
+    () => ficheOrderStats(ficheTechnics, commands, readyByFiche(productions, deliveries, recoveries)),
+    [ficheTechnics, commands, productions, deliveries, recoveries]
+  );
 
   const [dismissed, setDismissed] = useState<string[]>([]);
 
@@ -387,67 +399,8 @@ export default function Dashboard() {
         }
       />
 
-      {/* =============== Treasury hero =============== */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="lg:col-span-2 relative overflow-hidden rounded-2xl bg-gradient-button text-white shadow-gold p-6"
-        >
-          <motion.div
-            className="absolute -top-12 -right-10 h-48 w-48 rounded-full bg-white/15 blur-2xl"
-            animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.8, 0.5] }}
-            transition={{ duration: 6, repeat: Infinity }}
-          />
-          <motion.div
-            className="absolute -bottom-14 -left-8 h-44 w-44 rounded-full bg-white/10 blur-2xl"
-            animate={{ scale: [1, 1.2, 1] }}
-            transition={{ duration: 8, repeat: Infinity }}
-          />
-          <div className="relative">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center"><Wallet size={18} /></div>
-              <span className="text-sm font-medium text-white/90">Solde de caisse</span>
-            </div>
-            <p className="font-display text-4xl sm:text-5xl font-bold tabular tracking-tight mt-2">
-              {formatCurrency(stats.caisseBalance)}
-            </p>
-            <div className="flex flex-wrap gap-2 mt-5">
-              <HeroChip icon={<Package size={15} />} label="Stock" value={formatCurrency(stats.stockValue)} />
-              <HeroChip icon={<PackageCheck size={15} />} label="Comptoir" value={formatCurrency(stats.comptoirValue)} />
-              <HeroChip icon={<Layers size={15} />} label="Trésorerie totale" value={formatCurrency(stats.treasury)} />
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08 }}
-          className="rounded-2xl bg-gradient-card border border-gold/15 shadow-card p-5 flex flex-col"
-        >
-          <h3 className="font-display font-semibold text-text-primary text-sm mb-2">Rentabilité du mois</h3>
-          <div className="flex-1 min-h-[150px]">
-            <ResponsiveContainer width="100%" height={150}>
-              <RadialBarChart innerRadius="65%" outerRadius="100%" data={marginGauge} startAngle={210} endAngle={-30}>
-                <RadialBar background dataKey="value" cornerRadius={10} />
-              </RadialBarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="text-center -mt-8 mb-2">
-            <p className={`text-2xl font-bold tabular ${stats.netProfit >= 0 ? 'text-pistachio' : 'text-rose-deep'}`}>
-              {stats.monthSales > 0 ? `${((stats.netProfit / stats.monthSales) * 100).toFixed(1)}%` : '—'}
-            </p>
-            <p className="text-[11px] text-text-muted">marge nette</p>
-          </div>
-          <div className="space-y-1 text-xs border-t border-gold/10 pt-2.5">
-            <MiniRow label="Ventes" value={formatCurrency(stats.monthSales)} color="text-pistachio" />
-            <MiniRow label="Achats" value={`- ${formatCurrency(stats.monthPurchases)}`} color="text-caramel" />
-            <MiniRow label="Dépenses" value={`- ${formatCurrency(stats.monthExpenses)}`} color="text-rose-deep" />
-            <MiniRow label="Salaires" value={`- ${formatCurrency(stats.workerPaid)}`} color="text-lavender-deep" />
-          </div>
-        </motion.div>
-      </div>
+      {/* =============== Commandes par produit =============== */}
+      <ProductOrderCards stats={productStats} onDeliver={() => navigate('/livraisons')} />
 
       {/* =============== Animated alerts =============== */}
       {alerts.length > 0 && (
@@ -741,12 +694,39 @@ export default function Dashboard() {
       </div>
 
       {/* =============== Business tiles =============== */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="rounded-2xl bg-gradient-card border border-gold/15 shadow-card p-5 flex flex-col"
+        >
+          <h3 className="font-display font-semibold text-text-primary text-sm mb-2">Rentabilité du mois</h3>
+          <div className="flex-1 min-h-[150px]">
+            <ResponsiveContainer width="100%" height={150}>
+              <RadialBarChart innerRadius="65%" outerRadius="100%" data={marginGauge} startAngle={210} endAngle={-30}>
+                <RadialBar background dataKey="value" cornerRadius={10} />
+              </RadialBarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="text-center -mt-8 mb-2">
+            <p className={`text-2xl font-bold tabular ${stats.netProfit >= 0 ? 'text-pistachio' : 'text-rose-deep'}`}>
+              {stats.monthSales > 0 ? `${((stats.netProfit / stats.monthSales) * 100).toFixed(1)}%` : '—'}
+            </p>
+            <p className="text-[11px] text-text-muted">marge nette</p>
+          </div>
+          <div className="space-y-1 text-xs border-t border-gold/10 pt-2.5">
+            <MiniRow label="Ventes" value={formatCurrency(stats.monthSales)} color="text-pistachio" />
+            <MiniRow label="Achats" value={`- ${formatCurrency(stats.monthPurchases)}`} color="text-caramel" />
+            <MiniRow label="Dépenses" value={`- ${formatCurrency(stats.monthExpenses)}`} color="text-rose-deep" />
+            <MiniRow label="Salaires" value={`- ${formatCurrency(stats.workerPaid)}`} color="text-lavender-deep" />
+          </div>
+        </motion.div>
         <Card index={0}>
           <h3 className="font-display font-semibold text-text-primary mb-4 flex items-center gap-2">
             <Factory size={18} className="text-gold" /> Production &amp; comptoir
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <Tile icon={<Factory size={18} />} label="Productions" value={formatNumber(productions.length)} color="text-gold-dark" isCount />
             <Tile icon={<Clock size={18} />} label="Aujourd'hui" value={formatNumber(stats.todayProductions.length)} color="text-lavender-deep" isCount />
             <Tile icon={<Coins size={18} />} label="Coût matières" value={formatCurrency(stats.productionCost)} color="text-rose-deep" />
@@ -758,7 +738,7 @@ export default function Dashboard() {
           <h3 className="font-display font-semibold text-text-primary mb-4 flex items-center gap-2">
             <HardHat size={18} className="text-gold" /> Équipe &amp; partenaires
           </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <Tile icon={<HardHat size={18} />} label="Employés" value={formatNumber(workers.length)} color="text-gold-dark" isCount />
             <Tile icon={<Timer size={18} />} label="H. sup. à payer" value={formatCurrency(stats.unpaidOvertime)} color="text-caramel" />
             <Tile icon={<Users size={18} />} label="Clients" value={formatNumber(clients.length)} color="text-pistachio" isCount />
@@ -786,18 +766,6 @@ export default function Dashboard() {
           />
         </div>
       </Card>
-    </div>
-  );
-}
-
-function HeroChip({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-2 bg-white/15 backdrop-blur rounded-xl px-3 py-2">
-      {icon}
-      <div>
-        <p className="text-[11px] text-white/80 leading-none">{label}</p>
-        <p className="text-sm font-bold tabular">{value}</p>
-      </div>
     </div>
   );
 }

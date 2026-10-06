@@ -12,6 +12,8 @@ export interface AddProductionInput {
   hour: string;
   categoryId?: string;
   categoryName?: string;
+  /** Fiche technique produite : la quantité rejoint son stock prêt. */
+  ficheTechnicId?: string;
   usedProducts: UsedProduct[];
   outputQuantity: number;
   unitPrice: number;
@@ -49,7 +51,7 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
 
   addProduction: async (data) => {
     const {
-      name, description, date, hour, categoryId, categoryName, usedProducts,
+      name, description, date, hour, categoryId, categoryName, ficheTechnicId, usedProducts,
       outputQuantity, unitPrice, sellByUnit, sellUnit,
       hasLoss, expectedQuantity, lossQuantity, lossDescription, lossValue,
     } = data;
@@ -60,6 +62,7 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
         name, description, date, hour,
         category_id: categoryId ?? null,
         category_name: categoryName ?? null,
+        fiche_technic_id: ficheTechnicId ?? null,
         output_quantity: outputQuantity,
         unit_price: unitPrice,
         sell_by_unit: sellByUnit ?? false,

@@ -2,8 +2,8 @@ import type { StoreSettings, PaymentMethod } from '@/types';
 import { formatCurrency, formatDate, formatDateTime, paymentMethodLabel } from './utils';
 import { amountInWords } from './invoicePrint';
 import {
-  printOfficialDocument, versementLine,
-  type DocRow, type DocTotal,
+  printOfficialDocument, versementLine, esc,
+  type DocRow, type DocTotal, type DocTable,
 } from './officialDoc';
 
 /* ============================================================================
@@ -830,6 +830,312 @@ export function printOvertimeReceipt(data: OvertimeReceiptData, store: StoreSett
       footNotes: [versementLine(data.amount, data.paidAt)],
       signatures: ["L'employé", 'Signature'],
       fileName: `Heures_Sup_${data.workerName.replace(/\s+/g, '_')}`,
+    },
+    store
+  );
+}
+
+/* ------------------------------------------------ bon de récupération (retour) */
+
+export interface RecoveryNoteLine {
+  productName: string;
+  /** Quantité remise sur le bon d'origine. */
+  delivered: number;
+  /** Quantité récupérée par CE bon. */
+  recovered: number;
+  unit?: string;
+  unitPrice: number;
+}
+
+export interface RecoveryNoteData {
+  reference: string;
+  deliveryReference: string;
+  commandReference?: string;
+  recoveredAt: string;
+  client: ClientFiscal;
+  reason?: string;
+  lines: RecoveryNoteLine[];
+  tvaEnabled?: boolean;
+  tvaRate?: number;
+  tvaAmount?: number;
+  totalHt: number;
+  totalTtc: number;
+  /** Argent payé que la facture n'appelle plus. */
+  excessAmount: number;
+  /** Part rendue au client en espèces. */
+  refundAmount: number;
+  refundMethod?: PaymentMethod;
+  docTitle?: string;
+  endText?: string;
+}
+
+/**
+ * BON DE RÉCUPÉRATION — même papier officiel que le bon de livraison :
+ * le client rend la marchandise, elle réintègre le stock prêt, et l'argent
+ * qu'il avait payé au-delà de ce qu'il garde lui est rendu.
+ */
+export function printRecoveryNote(data: RecoveryNoteData, store: StoreSettings) {
+  const keptAsCredit = Math.max(0, Math.round((data.excessAmount - data.refundAmount) * 100) / 100);
+  const rows: DocRow[] = data.lines.map((l) => {
+    const u = l.unit && l.unit.trim() ? ` ${esc(l.unit)}` : '';
+    return {
+      cells: [
+        esc(l.productName.toUpperCase()),
+        `${qty(l.delivered)}${u}`,
+        `${qty(l.recovered)}${u}`,
+        formatCurrency(l.unitPrice),
+        formatCurrency(l.recovered * l.unitPrice),
+      ],
+    };
+  });
+
+  const totals: DocTotal[] = [{ label: 'Valeur récupérée H.T', value: formatCurrency(data.totalHt) }];
+  if (data.tvaEnabled) {
+    totals.push({ label: `T.V.A ${data.tvaRate ?? 19} %`, value: formatCurrency(data.tvaAmount ?? 0) });
+    totals.push({ label: 'Valeur récupérée T.T.C', value: formatCurrency(data.totalTtc), strong: true });
+  } else {
+    totals.push({ label: 'Valeur récupérée', value: formatCurrency(data.totalTtc), strong: true });
+  }
+  totals.push({ label: 'Montant remboursé', value: formatCurrency(data.refundAmount), strong: data.refundAmount > 0 });
+  if (keptAsCredit > 0) {
+    totals.push({ label: 'Gardé en acompte client', value: formatCurrency(keptAsCredit) });
+  }
+
+  printOfficialDocument(
+    {
+      title: (data.docTitle?.trim() || 'BON DE RÉCUPÉRATION').toUpperCase(),
+      docDate: data.recoveredAt,
+      endText: data.endText,
+      doitLabel: 'CLIENT',
+      doitName: data.client.name,
+      doitLines: fiscalLines(data.client),
+      metaLines: [
+        `N° : ${data.reference}`,
+        `BL D'ORIGINE : ${data.deliveryReference}`,
+        data.commandReference ? `COMMANDE : ${data.commandReference}` : '',
+        `LE ${formatDateTime(data.recoveredAt)}`,
+      ].filter(Boolean),
+      tables: [
+        {
+          columns: [
+            { label: 'Désignation', align: 'left' },
+            { label: 'Qté livrée', align: 'center', width: '13%' },
+            { label: 'Qté récupérée', align: 'center', width: '15%' },
+            { label: 'Prix U', align: 'right', width: '16%' },
+            { label: 'Montant H.T', align: 'right', width: '18%' },
+          ],
+          rows,
+          totals,
+          emptyLabel: 'Aucune quantité récupérée',
+        },
+      ],
+      amountInWords: data.refundAmount > 0 ? amountInWords(data.refundAmount) : undefined,
+      observations: data.reason?.trim() ? data.reason.trim() : undefined,
+      stamps: [
+        { label: 'Marchandise réintégrée au stock prêt', tone: 'ok' as const },
+        data.refundAmount > 0
+          ? {
+              label: `Remboursé au client — ${paymentMethodLabel({ method: data.refundMethod ?? 'especes' })}`,
+              tone: 'warn' as const,
+            }
+          : keptAsCredit > 0
+            ? { label: 'Montant gardé en acompte du client', tone: 'ok' as const }
+            : { label: 'Aucun remboursement — la dette du client baisse', tone: 'ok' as const },
+      ],
+      footNotes: data.refundAmount > 0
+        ? [`REMBOURSEMENT DE ${formatCurrency(data.refundAmount)} LE ${formatDate(data.recoveredAt)}`]
+        : [],
+      signatures: ['Le client', 'Signature'],
+      fileName: `Recuperation_${data.reference}`,
+    },
+    store
+  );
+}
+
+/* ----------------------------------------------------------- liste des prix */
+
+export interface PriceListItem {
+  name: string;
+  description?: string;
+  category?: string;
+  unit?: string;
+  price: number;
+  imageUrl?: string;
+}
+
+export interface PriceListOptions {
+  title?: string;
+  /** Regroupe les produits par catégorie (bandeau de section). */
+  groupByCategory?: boolean;
+  /** Affiche la photo de chaque produit. */
+  showImages?: boolean;
+  /** Ajoute une colonne prix T.T.C. */
+  showTtc?: boolean;
+  tvaRate?: number;
+  /** Mention imprimée sous le tableau (validité, conditions…). */
+  note?: string;
+  endText?: string;
+}
+
+/**
+ * LISTE DES PRIX — catalogue des produits finis (fiches techniques) sur le
+ * papier à en-tête officiel : photo, désignation et description, unité de
+ * vente, prix H.T (et T.T.C si demandé), regroupés par catégorie.
+ */
+export function printPriceList(items: PriceListItem[], store: StoreSettings, opts: PriceListOptions = {}) {
+  const rate = opts.tvaRate ?? 19;
+  const showImages = opts.showImages ?? true;
+  const sorted = [...items].sort(
+    (a, b) =>
+      (opts.groupByCategory ? (a.category || '').localeCompare(b.category || '') : 0) ||
+      a.name.localeCompare(b.name)
+  );
+
+  const columns: DocTable['columns'] = [
+    { label: 'N°', align: 'center', width: '6%' },
+    ...(showImages ? [{ label: 'Photo', align: 'center' as const, width: '12%' }] : []),
+    { label: 'Désignation', align: 'left' },
+    { label: 'Unité', align: 'center', width: '10%' },
+    { label: opts.showTtc ? 'Prix H.T' : 'Prix unitaire', align: 'right', width: '17%' },
+    ...(opts.showTtc ? [{ label: `Prix T.T.C (${rate} %)`, align: 'right' as const, width: '18%' }] : []),
+  ];
+
+  const imageCell = (url?: string) =>
+    url
+      ? `<img src="${esc(url)}" alt="" style="width:58px;height:58px;object-fit:cover;border-radius:6px;border:1.5px solid #e4e4e7;display:block;margin:0 auto;"/>`
+      : `<div style="width:58px;height:58px;border-radius:6px;border:1.5px dashed #d4d4d8;margin:0 auto;display:flex;align-items:center;justify-content:center;color:#a1a1aa;font-size:20px;">◇</div>`;
+
+  const nameCell = (it: PriceListItem) =>
+    `<div style="font-weight:800;text-transform:uppercase;letter-spacing:.3px;">${esc(it.name)}</div>` +
+    (it.description?.trim()
+      ? `<div style="font-size:11.5px;font-weight:600;color:#52525b;margin-top:3px;line-height:1.35;">${esc(it.description.trim())}</div>`
+      : '');
+
+  const priceCell = (v: number, strong = true) =>
+    `<span style="font-weight:${strong ? 800 : 700};color:${strong ? '#991b1b' : '#0a0a0a'};white-space:nowrap;">${formatCurrency(v)}</span>`;
+
+  const rows: DocRow[] = [];
+  let lastCat: string | null = null;
+  let n = 0;
+  sorted.forEach((it) => {
+    const cat = it.category || 'Autres produits';
+    if (opts.groupByCategory && cat !== lastCat) {
+      const count = sorted.filter((x) => (x.category || 'Autres produits') === cat).length;
+      rows.push({ cells: [`${esc(cat.toUpperCase())} — ${count} produit${count > 1 ? 's' : ''}`, ''], variant: 'group', span: true });
+      lastCat = cat;
+    }
+    n += 1;
+    rows.push({
+      cells: [
+        String(n),
+        ...(showImages ? [imageCell(it.imageUrl)] : []),
+        nameCell(it),
+        it.unit?.trim() ? esc(it.unit) : '/',
+        priceCell(it.price),
+        ...(opts.showTtc ? [priceCell(Math.round(it.price * (100 + rate)) / 100, false)] : []),
+      ],
+    });
+  });
+
+  printOfficialDocument(
+    {
+      title: (opts.title?.trim() || 'LISTE DES PRIX').toUpperCase(),
+      docDate: new Date().toISOString(),
+      endText: opts.endText,
+      metaLines: [
+        `TARIFS EN VIGUEUR AU ${formatDate(new Date())}`,
+        `${items.length} PRODUIT${items.length > 1 ? 'S' : ''}`,
+        opts.showTtc ? `T.V.A ${rate} % INCLUSE (COLONNE T.T.C)` : 'PRIX HORS TAXES',
+      ],
+      tables: [{ columns, rows, emptyLabel: 'Aucun produit sélectionné' }],
+      observations: opts.note?.trim() ? opts.note.trim() : undefined,
+      signatures: ['La direction', 'Cachet & signature'],
+      fileName: 'Liste_des_prix',
+    },
+    store
+  );
+}
+
+/* ------------------------------------- facture NON comptabilisée (impression) */
+
+export interface FreeDocumentData {
+  docType: 'facture' | 'bon_livraison' | 'proforma';
+  reference: string;
+  date: string;
+  client: ClientFiscal;
+  location?: string;
+  driverName?: string;
+  driverPlate?: string;
+  lines: { productName: string; description?: string; quantity: number; unit?: string; unitPrice: number }[];
+  totalHt: number;
+  reduction: number;
+  tvaEnabled: boolean;
+  tvaRate: number;
+  tvaAmount: number;
+  finalAmount: number;
+  paidAmount: number;
+  restAmount: number;
+  paymentMode?: string;
+  notes?: string;
+  docTitle?: string;
+  endText?: string;
+}
+
+/**
+ * BON DE LIVRAISON d'une facture non comptabilisée : même modèle que le bon de
+ * livraison officiel (la facture et la proforma passent par `printSaleInvoice`).
+ */
+export function printFreeDeliveryNote(data: FreeDocumentData, store: StoreSettings) {
+  const address = (data.location || data.client.address || '').trim();
+  const totals: DocTotal[] = [{ label: 'Total H.T', value: formatCurrency(data.totalHt) }];
+  if (data.reduction) {
+    totals.push({ label: 'Réduction', value: `- ${formatCurrency(data.reduction)}` });
+  }
+  if (data.tvaEnabled) {
+    totals.push({ label: `T.V.A ${data.tvaRate} %`, value: formatCurrency(data.tvaAmount) });
+    totals.push({ label: 'Total T.T.C', value: formatCurrency(data.finalAmount), strong: true });
+  } else {
+    totals.push({ label: 'Total', value: formatCurrency(data.finalAmount), strong: true });
+  }
+  totals.push({ label: 'Versement', value: formatCurrency(data.paidAmount) });
+  totals.push({ label: 'Reste à payer', value: formatCurrency(data.restAmount), strong: true });
+
+  printOfficialDocument(
+    {
+      title: (data.docTitle?.trim() || 'BON DE LIVRAISON').toUpperCase(),
+      docDate: data.date,
+      endText: data.endText,
+      doitName: data.client.name,
+      doitLines: fiscalLines(data.client),
+      metaLines: [
+        `N° BL : ${data.reference}`,
+        data.driverName ? `CHAUFFEUR : ${data.driverName}${data.driverPlate ? ` · ${data.driverPlate}` : ''}` : '',
+      ].filter(Boolean),
+      tables: [
+        {
+          columns: [
+            { label: 'Désignation', align: 'left' },
+            { label: 'Adresse de livraison', align: 'left', width: '24%' },
+            { label: 'Quantité', align: 'center', width: '13%' },
+            { label: 'Prix U', align: 'right', width: '17%' },
+            { label: 'P.T H.T', align: 'right', width: '19%' },
+          ],
+          rows: data.lines.map((l) => ({
+            cells: [
+              esc((l.productName + (l.description ? ` — ${l.description}` : '')).toUpperCase()),
+              esc((address || '/').toUpperCase()),
+              `${qty(l.quantity)}${l.unit ? ` ${esc(l.unit)}` : ''}`,
+              formatCurrency(l.unitPrice),
+              formatCurrency(l.quantity * l.unitPrice),
+            ],
+          })),
+          totals,
+          emptyLabel: 'Aucune ligne',
+        },
+      ],
+      observations: data.notes?.trim() ? data.notes.trim() : undefined,
+      signatures: ['Le client', 'Signature'],
+      fileName: `Bon_de_Livraison_${data.reference}`,
     },
     store
   );

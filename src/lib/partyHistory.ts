@@ -1,6 +1,6 @@
 import type {
   Sale, Purchase, PartyPayment, PartyOldDebt, PartyCreditRefund, ClientDebt,
-  CommandDelivery, CommandAdjustment,
+  CommandDelivery, CommandAdjustment, DeliveryRecovery,
 } from '@/types';
 import type { Command } from '@/store/commandStore';
 import { dayOf } from './utils';
@@ -82,6 +82,8 @@ export interface ClientHistory {
   oldDebts: PartyOldDebt[];
   refunds: PartyCreditRefund[];
   adjustments: CommandAdjustment[];
+  /** Marchandise recuperee sur ses bons de livraison (retours). */
+  recoveries: DeliveryRecovery[];
   /** Dettes enregistrees (ecran « dettes clients ») rattachees au client. */
   debts: ClientDebt[];
 }
@@ -127,12 +129,13 @@ export interface ClientHistoryInput {
   refunds: PartyCreditRefund[];
   debts: ClientDebt[];
   adjustments?: CommandAdjustment[];
+  recoveries?: DeliveryRecovery[];
 }
 
 export function buildClientHistory(input: ClientHistoryInput): ClientHistory {
   const {
     clientId, sales, commands, deliveries, payments, oldDebts, refunds, debts,
-    adjustments = [],
+    adjustments = [], recoveries = [],
   } = input;
 
   const mySales = sales.filter((s) => s.clientId === clientId);
@@ -259,6 +262,9 @@ export function buildClientHistory(input: ClientHistoryInput): ClientHistory {
     adjustments: adjustments
       .filter((a) => cmdIds.has(a.commandId))
       .sort((a, b) => byDateDesc(a.date, b.date)),
+    recoveries: recoveries
+      .filter((r) => r.clientId === clientId || (!!r.commandId && cmdIds.has(r.commandId)))
+      .sort((a, b) => byDateDesc(a.recoveredAt, b.recoveredAt)),
     debts: myDebts,
   };
 }

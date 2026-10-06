@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   HandCoins, History, Undo2, Eye, Pencil, Printer, Trash2, Wallet, Coins,
-  ShoppingBag, ClipboardList, Truck, ScissorsSquare, TrendingUp, Package, PiggyBank,
+  ShoppingBag, ClipboardList, Truck, ScissorsSquare, TrendingUp, Package, PiggyBank, RotateCcw,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -31,8 +31,9 @@ import { formatCurrency, formatDate, formatDateTime, paymentMethodLabel, todayIS
 import { printSaleInvoice } from '@/lib/invoicePrint';
 import { printDeliveryNote, printCommandOrder, printPaymentReceipt } from '@/lib/documents';
 import { printListDocument } from '@/lib/statementPrint';
+import { printRecoveryFor } from '@/lib/deliveryDocs';
 import type {
-  Client, PartyOldDebt, PartyPayment, Sale, PartyCreditRefund, CommandAdjustment,
+  Client, PartyOldDebt, PartyPayment, Sale, PartyCreditRefund, CommandAdjustment, DeliveryRecovery,
 } from '@/types';
 import type { Command } from '@/store/commandStore';
 
@@ -109,6 +110,8 @@ export function ClientHistoryScreen({
   const commands = useCommandStore((s) => s.commands);
   const deliveries = useCommandStore((s) => s.deliveries);
   const adjustments = useCommandStore((s) => s.adjustments);
+  const recoveries = useCommandStore((s) => s.recoveries);
+  const deleteRecovery = useCommandStore((s) => s.deleteRecovery);
   const deleteCommand = useCommandStore((s) => s.deleteCommand);
   const deleteDelivery = useCommandStore((s) => s.deleteDelivery);
   const deleteAdjustment = useCommandStore((s) => s.deleteAdjustment);
@@ -140,9 +143,9 @@ export function ClientHistoryScreen({
     if (!client) return null;
     return buildClientHistory({
       clientId: client.id,
-      sales, commands, deliveries, payments, oldDebts, refunds, debts, adjustments,
+      sales, commands, deliveries, payments, oldDebts, refunds, debts, adjustments, recoveries,
     });
-  }, [client, sales, commands, deliveries, payments, oldDebts, refunds, debts, adjustments]);
+  }, [client, sales, commands, deliveries, payments, oldDebts, refunds, debts, adjustments, recoveries]);
 
   /** Situation du compte — le MEME calcul que la carte du client. */
   const balance = useMemo(() => {
@@ -696,6 +699,56 @@ export function ClientHistoryScreen({
     },
   ];
 
+  /** Remboursement réellement fait (il a pu être corrigé ou annulé depuis la fiche). */
+  const refundOfRecovery = (r: DeliveryRecovery) =>
+    r.refundId ? (refunds.find((x) => x.id === r.refundId)?.amount ?? r.refundAmount) : r.refundAmount;
+
+  const printRecovery = (r: DeliveryRecovery) =>
+    setTitleRequest({
+      defaultTitle: 'BON DE RÉCUPÉRATION',
+      scope: 'delivery',
+      dialogTitle: `Imprimer le bon ${r.reference}`,
+      print: ({ title, endText }) => {
+        const d = deliveries.find((x) => x.id === r.deliveryId);
+        const cmd = commands.find((c) => c.id === (r.commandId ?? d?.commandId));
+        printRecoveryFor(r, d, cmd, client, refundOfRecovery(r), settings, title, endText);
+      },
+    });
+
+  const recoveryColumns: DataColumn<DeliveryRecovery>[] = [
+    { key: 'date', label: 'Date et heure', render: (r) => formatDateTime(r.recoveredAt, language) },
+    { key: 'ref', label: 'N', render: (r) => <span className="font-semibold">{r.reference}</span> },
+    { key: 'bl', label: 'Bon de livraison', hideOnMobile: true,
+      render: (r) => deliveries.find((d) => d.id === r.deliveryId)?.reference ?? '—' },
+    { key: 'lines', label: 'Produits', hideOnMobile: true,
+      render: (r) => r.items.map((i) => `${i.productName} (${i.quantity})`).join(' · ') || '—' },
+    { key: 'qty', label: 'Quantite', align: 'right',
+      render: (r) => <span className="text-rose-deep">−{r.items.reduce((s, i) => s + i.quantity, 0)}</span> },
+    { key: 'value', label: 'Valeur TTC', align: 'right', render: (r) => <span className="font-bold text-rose-deep">− {money(r.totalTtc)}</span> },
+    { key: 'refund', label: 'Rembourse', align: 'right',
+      render: (r) => {
+        const v = refundOfRecovery(r);
+        return v > 0
+          ? <span className="font-bold text-caramel">− {money(v)}</span>
+          : r.excessAmount > 0 ? <Badge variant="success" className="text-[10px]">En acompte</Badge> : '—';
+      } },
+    { key: 'reason', label: 'Motif', hideOnMobile: true, render: (r) => r.reason || '—' },
+  ];
+
+  const recoveryActions = (r: DeliveryRecovery): ActionItem[] => [
+    { label: 'Imprimer le bon de recuperation', icon: <Printer size={15} />, onClick: () => printRecovery(r) },
+    {
+      label: 'Annuler la recuperation', icon: <Trash2 size={15} />, danger: true,
+      hidden: !can('clients', 'delete'),
+      onClick: () =>
+        ask(
+          'Annuler la recuperation',
+          'La marchandise repart chez le client : elle quitte le stock pret, la facture du bon remonte et le remboursement est annule.',
+          async () => { await deleteRecovery(r.id); toast.success('Recuperation annulee'); }
+        ),
+    },
+  ];
+
   /* ---------------------------------------------------------- les parts --- */
   const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 
@@ -984,6 +1037,31 @@ export function ClientHistoryScreen({
       dateOf: (r: never) => (r as unknown as PartyCreditRefund).refundedAt,
       searchOf: (r: never) => (r as unknown as PartyCreditRefund).notes ?? '',
       empty: 'Aucun excedent rendu a ce client',
+    },
+    {
+      key: 'recoveries', label: 'Recuperations', icon: <RotateCcw size={14} />,
+      rows: history.recoveries as never[],
+      columns: recoveryColumns as DataColumn<never>[],
+      actions: recoveryActions as unknown as (row: never, i: number) => ActionItem[],
+      stats: [
+        { label: 'Recuperations', value: String(history.recoveries.length), icon: <RotateCcw size={12} /> },
+        {
+          label: 'Quantite recuperee',
+          value: String(sum(history.recoveries.map((r) => r.items.reduce((a, i) => a + i.quantity, 0)))),
+          tone: 'neg',
+        },
+        { label: 'Valeur recuperee', value: money(sum(history.recoveries.map((r) => r.totalTtc))), tone: 'neg' },
+        { label: 'Rembourse', value: money(sum(history.recoveries.map(refundOfRecovery))), tone: 'neg' },
+      ],
+      dateOf: (r: never) => (r as unknown as DeliveryRecovery).recoveredAt,
+      searchOf: (r: never) => {
+        const x = r as unknown as DeliveryRecovery;
+        return `${x.reference} ${x.reason ?? ''} ${x.items.map((i) => i.productName).join(' ')}`;
+      },
+      empty: 'Aucune marchandise recuperee chez ce client',
+      note:
+        "Marchandise rendue par le client sur un bon de livraison : elle revient au stock pret, la facture du bon "
+        + "baisse et l'argent paye en trop lui est rendu (ou reste en acompte).",
     },
     {
       key: 'adjustments', label: 'Annulations / augmentations', icon: <ScissorsSquare size={14} />,

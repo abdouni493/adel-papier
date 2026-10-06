@@ -172,12 +172,17 @@ export function computeGains(input: GainsInput, from: string, to: string): Gains
   const tvaCollected = r2(posTVA + deliveryTVA);
 
   // ---- coût des marchandises vendues ------------------------------------
-  // 1. bons de livraison : les matières réellement retirées du stock
+  // 1. bons de livraison : les matières retirées du stock (anciens bons) ou le
+  //    coût de revient du produit fini livré (stock prêt / production
+  //    automatique), moins la marchandise récupérée depuis
   const deliveryById = new Map(input.deliveries.map((d) => [d.id, d]));
   const costDeliveries = sum(
     delivered.map((s) => {
       const d = s.deliveryId ? deliveryById.get(s.deliveryId) : undefined;
-      return (d?.consumptions ?? []).reduce((a, c) => a + (c.lineCost || 0), 0);
+      if (!d) return 0;
+      const materials = (d.consumptions ?? []).reduce((a, c) => a + (c.lineCost || 0), 0);
+      const finished = d.items.reduce((a, it) => a + (it.costAmount || 0), 0);
+      return Math.max(0, materials + finished - (d.recoveredCost ?? 0));
     })
   );
 

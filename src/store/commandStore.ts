@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 import type {
   CommandDelivery, CommandDeliveryItem, CommandAdjustment, CommandAdjustmentLine, CommandPayment,
+  DeliveryRecovery, PaymentMethod,
 } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
+import { recoveredByDelivery } from '@/lib/readyStock';
 import { useStockStore } from './stockStore';
 import { useSalesStore } from './salesStore';
+import { useProductionStore } from './productionStore';
 
 export interface CommandItem {
   /** database id of the line — needed to attribute a delivery to it */
@@ -122,11 +125,52 @@ export interface AdjustmentInput {
   unit?: string;
 }
 
+/** Une ligne saisie dans l'écran Livraisons : un produit et sa quantité. */
+export interface ClientDeliveryLineInput {
+  ficheTechnicId?: string;
+  productName: string;
+  quantity: number;
+}
+
+/** Livraison saisie depuis l'écran Livraisons (client → produits → quantités). */
+export interface ClientDeliveryInput {
+  clientId: string;
+  /** ISO datetime de la remise. */
+  deliveredAt: string;
+  notes?: string;
+  driverName?: string;
+  driverPlate?: string;
+  location?: string;
+  tvaEnabled?: boolean;
+  tvaRate?: number;
+  /** Argent encaissé à la remise (réparti sur les bons créés, dans l'ordre). */
+  cashPaid?: number;
+  /** Imputer l'acompte des commandes servies (oui par défaut). */
+  useAdvance?: boolean;
+  /** Acompte LIBRE du client à utiliser sur les factures créées. */
+  creditUsed?: number;
+  lines: ClientDeliveryLineInput[];
+}
+
+/** Récupération de marchandise saisie sur un bon de livraison. */
+export interface RecoveryInput {
+  deliveryId: string;
+  recoveredAt: string;
+  reason?: string;
+  /** 'cash' : l'argent est rendu (sortie de caisse) · 'credit' : il reste en acompte. */
+  refundMode: 'cash' | 'credit';
+  refundAmount?: number;
+  refundMethod?: PaymentMethod;
+  items: { commandItemId: string; quantity: number }[];
+}
+
 interface CommandState {
   commands: Command[];
   deliveries: CommandDelivery[];
   /** Annulations du reste et augmentations enregistrees sur les commandes. */
   adjustments: CommandAdjustment[];
+  /** Récupérations de marchandise sur les bons de livraison. */
+  recoveries: DeliveryRecovery[];
   load: () => Promise<void>;
   addCommand: (c: AddCommandInput) => Promise<Command>;
   /** Returns false when the product lines were kept because a delivery exists. */
@@ -164,6 +208,12 @@ interface CommandState {
     payment?: DeliveryPayment
   ) => Promise<void>;
   deleteDelivery: (id: string) => Promise<void>;
+  // ---- écran Livraisons ----
+  /** Crée un bon par commande servie ; renvoie les bons créés. */
+  addClientDelivery: (input: ClientDeliveryInput) => Promise<CommandDelivery[]>;
+  updateClientDelivery: (id: string, input: ClientDeliveryInput) => Promise<CommandDelivery | undefined>;
+  addRecovery: (input: RecoveryInput) => Promise<DeliveryRecovery | undefined>;
+  deleteRecovery: (id: string) => Promise<void>;
 }
 
 /** Chauffeur et lieu d'une livraison — repris de la commande ou saisis à la volée. */
@@ -225,9 +275,46 @@ const deliveryItemPayload = (i: CommandDeliveryItem) => ({
   sell_unit: i.sellUnit ?? null,
 });
 
-/** Recharge « Gestion de stock » après un mouvement déclenché par une livraison. */
+/**
+ * Recharge « Gestion de stock » ET les productions après une livraison : le
+ * manquant du stock prêt est produit automatiquement (matières déduites).
+ */
 const reloadStock = () =>
-  useStockStore.getState().load().catch(() => undefined);
+  Promise.all([
+    useStockStore.getState().load(),
+    useProductionStore.getState().load(),
+  ]).catch(() => undefined);
+
+/** Chaque bon connaît la quantité (et le coût) déjà récupérés sur lui. */
+const withRecoveries = (deliveries: CommandDelivery[], recoveries: DeliveryRecovery[]) => {
+  const rec = recoveredByDelivery(recoveries);
+  return deliveries.map((d) => {
+    const r = rec.get(d.id);
+    return r ? { ...d, recoveredQuantity: r.quantity, recoveredCost: r.cost } : d;
+  });
+};
+
+/** Lignes de l'écran Livraisons envoyées à la base. */
+const clientDeliveryPayload = (i: ClientDeliveryInput) => ({
+  client_id: i.clientId,
+  delivered_at: i.deliveredAt,
+  notes: i.notes ?? '',
+  driver_name: i.driverName ?? '',
+  driver_plate: i.driverPlate ?? '',
+  location: i.location ?? '',
+  ...(i.tvaEnabled === undefined
+    ? {}
+    : { tva_enabled: i.tvaEnabled, tva_rate: i.tvaEnabled ? (i.tvaRate ?? 19) : 0 }),
+  cash_paid: Math.max(0, i.cashPaid ?? 0),
+  use_advance: i.useAdvance ?? true,
+  lines: i.lines
+    .filter((l) => l.quantity > 0)
+    .map((l) => ({
+      fiche_technic_id: l.ficheTechnicId ?? null,
+      product_name: l.productName,
+      quantity: l.quantity,
+    })),
+});
 
 /** Option TVA envoyee a la base — omise quand l'appelant ne la precise pas. */
 const tvaPayload = (p?: DeliveryPayment) =>
@@ -264,11 +351,14 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
   deliveries: [],
   adjustments: [],
 
+  recoveries: [],
+
   load: async () => {
-    const [commands, deliveries, adjustments] = await Promise.all([
+    const [commands, deliveries, adjustments, recoveries] = await Promise.all([
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
+      db.deliveryRecoveries.list(),
     ]);
-    set({ commands, deliveries, adjustments });
+    set({ commands, deliveries: withRecoveries(deliveries, recoveries), adjustments, recoveries });
   },
 
   addCommand: async (data) => {
@@ -366,7 +456,7 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
       reloadSales(), reloadStock(), reloadAccounts(),
     ]);
-    set({ commands, deliveries, adjustments });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries), adjustments });
     return linesKept;
   },
 
@@ -376,7 +466,7 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
     const [commands, deliveries] = await Promise.all([
       db.commands.list(), db.commandDeliveries.list(), reloadSales(), reloadAccounts(),
     ]);
-    set({ commands, deliveries });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries) });
   },
 
   updateCommandPayment: async (id, amount, date, notes) => {
@@ -385,7 +475,7 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
     const [commands, deliveries] = await Promise.all([
       db.commands.list(), db.commandDeliveries.list(), reloadSales(), reloadAccounts(),
     ]);
-    set({ commands, deliveries });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries) });
   },
 
   updateStatus: async (commandId, status) => {
@@ -412,7 +502,7 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
       reloadSales(), reloadStock(), reloadAccounts(),
     ]);
-    set({ commands, deliveries, adjustments });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries), adjustments });
     return adjustments.find((a) => a.id === row?.id);
   },
 
@@ -434,7 +524,7 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
       reloadSales(), reloadStock(), reloadAccounts(),
     ]);
-    set({ commands, deliveries, adjustments });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries), adjustments });
     return adjustments.find((a) => a.id === row?.id);
   },
 
@@ -444,7 +534,7 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
       reloadSales(), reloadStock(), reloadAccounts(),
     ]);
-    set({ commands, deliveries, adjustments });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries), adjustments });
   },
 
   deleteCommand: async (id) => {
@@ -453,10 +543,12 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
     // Tout ce qui pendait a cette commande disparait avec elle : ses bons de
     // livraison (donc leurs factures de vente), ses annulations et ses
     // augmentations — plus rien ne doit la faire réapparaître dans un rapport.
+    const goneDeliveries = new Set(get().deliveries.filter((d) => d.commandId === id).map((d) => d.id));
     set({
       commands: get().commands.filter((c) => c.id !== id),
       deliveries: get().deliveries.filter((d) => d.commandId !== id),
       adjustments: get().adjustments.filter((a) => a.commandId !== id),
+      recoveries: get().recoveries.filter((r) => !goneDeliveries.has(r.deliveryId)),
     });
     // ses livraisons partent en cascade : leurs matières reviennent au stock
     await Promise.all([reloadAccounts(), ...(hadDeliveries ? [reloadStock(), reloadSales()] : [])]);
@@ -483,7 +575,7 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
       reloadStock(), reloadSales(), reloadAccounts(),
     ]);
-    set({ commands, deliveries, adjustments });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries), adjustments });
     return deliveries.find((d) => d.id === row.id) as CommandDelivery;
   },
 
@@ -506,16 +598,102 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
       reloadStock(), reloadSales(), reloadAccounts(),
     ]);
-    set({ commands, deliveries, adjustments });
+    set({ commands, deliveries: withRecoveries(deliveries, get().recoveries), adjustments });
   },
 
   deleteDelivery: async (id) => {
     await save('commands.delivery.delete', () => rpc.deleteCommandDelivery(id));
-    // supprimer une livraison remet les matières en stock
+    // supprimer une livraison remet les matières en stock (production
+    // automatique défaite) et emporte ses récupérations
+    const [commands, deliveries, adjustments, recoveries] = await Promise.all([
+      db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
+      db.deliveryRecoveries.list(), reloadStock(), reloadSales(), reloadAccounts(),
+    ]);
+    set({ commands, deliveries: withRecoveries(deliveries, recoveries), adjustments, recoveries });
+  },
+
+  /* ==========================================================================
+   *  ÉCRAN LIVRAISONS — client → produit → quantité
+   *  La base impute chaque quantité sur les commandes en cours du client (la
+   *  plus ancienne d'abord) et crée UN bon par commande servie. Chaque bon
+   *  prend d'abord dans le stock prêt du produit ; le manquant est produit
+   *  automatiquement. Le bon vaut vente : facture, caisse, dette du client.
+   * ======================================================================== */
+  addClientDelivery: async (input) => {
+    const rows = await save<Array<{ id: string; sale_id?: string | null }>>('deliveries.client.create', () =>
+      rpc.createClientDelivery(clientDeliveryPayload(input))
+    );
+    const ids = (rows ?? []).map((r) => r.id);
+    // l'acompte LIBRE du client paie les factures créées, dans l'ordre
+    let credit = Math.max(0, input.creditUsed ?? 0);
+    for (const r of rows ?? []) {
+      if (credit <= 0.004 || !r.sale_id) break;
+      try {
+        const used = await rpc.applyCreditToSale(r.sale_id, credit);
+        credit -= Number(used) || 0;
+      } catch { /* la facture reste à crédit */ }
+    }
     const [commands, deliveries, adjustments] = await Promise.all([
       db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
       reloadStock(), reloadSales(), reloadAccounts(),
     ]);
-    set({ commands, deliveries, adjustments });
+    const merged = withRecoveries(deliveries, get().recoveries);
+    set({ commands, deliveries: merged, adjustments });
+    return merged.filter((d) => ids.includes(d.id));
+  },
+
+  updateClientDelivery: async (id, input) => {
+    await save('deliveries.client.update', () => rpc.updateClientDelivery(id, clientDeliveryPayload(input)));
+    const credit = Math.max(0, input.creditUsed ?? 0);
+    if (credit > 0.004) {
+      const fresh = await db.commandDeliveries.list();
+      const saleId = fresh.find((d) => d.id === id)?.saleId;
+      if (saleId) {
+        try { await rpc.applyCreditToSale(saleId, credit); } catch { /* reste à crédit */ }
+      }
+    }
+    const [commands, deliveries, adjustments, recoveries] = await Promise.all([
+      db.commands.list(), db.commandDeliveries.list(), db.commandAdjustments.list(),
+      db.deliveryRecoveries.list(), reloadStock(), reloadSales(), reloadAccounts(),
+    ]);
+    const merged = withRecoveries(deliveries, recoveries);
+    set({ commands, deliveries: merged, adjustments, recoveries });
+    return merged.find((d) => d.id === id);
+  },
+
+  /* ==========================================================================
+   *  RÉCUPÉRATION — la marchandise revient au stock prêt, la quantité redevient
+   *  « à livrer » sur la commande, la facture baisse et l'argent payé au-delà
+   *  est rendu au client (ou reste en acompte sur son compte).
+   * ======================================================================== */
+  addRecovery: async (input) => {
+    const row = await save<{ id: string }>('deliveries.recovery.create', () =>
+      rpc.createDeliveryRecovery({
+        delivery_id: input.deliveryId,
+        recovered_at: input.recoveredAt,
+        reason: input.reason ?? '',
+        refund_mode: input.refundMode,
+        refund_amount: input.refundAmount ?? null,
+        refund_method: input.refundMethod ?? 'especes',
+        items: input.items
+          .filter((i) => i.quantity > 0)
+          .map((i) => ({ command_item_id: i.commandItemId, quantity: i.quantity })),
+      })
+    );
+    const [commands, deliveries, recoveries] = await Promise.all([
+      db.commands.list(), db.commandDeliveries.list(), db.deliveryRecoveries.list(),
+      reloadStock(), reloadSales(), reloadAccounts(),
+    ]);
+    set({ commands, deliveries: withRecoveries(deliveries, recoveries), recoveries });
+    return recoveries.find((r) => r.id === row?.id);
+  },
+
+  deleteRecovery: async (id) => {
+    await save('deliveries.recovery.delete', () => db.deliveryRecoveries.remove(id));
+    const [commands, deliveries, recoveries] = await Promise.all([
+      db.commands.list(), db.commandDeliveries.list(), db.deliveryRecoveries.list(),
+      reloadStock(), reloadSales(), reloadAccounts(),
+    ]);
+    set({ commands, deliveries: withRecoveries(deliveries, recoveries), recoveries });
   },
 }));

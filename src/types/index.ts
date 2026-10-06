@@ -236,6 +236,11 @@ export interface Sale {
    * d'un encaissement porté par la facture — aucune écriture de caisse.
    */
   allocatedAmount?: number;
+  /**
+   * Argent rendu au client après la RÉCUPÉRATION d'une partie du bon de
+   * livraison : il ne paie plus cette facture (déjà déduit de `paidAmount`).
+   */
+  refundedAmount?: number;
   status: SaleStatus;
   payments: Payment[];
   createdBy?: string;
@@ -279,7 +284,13 @@ export interface Production {
   // Where the batch comes from:
   //  - 'manual' (default): launched from the Production screen
   //  - 'pos': launched automatically when the cashier sold a fiche technique
-  origin?: 'manual' | 'pos';
+  //  - 'delivery': produced automatically because a delivery needed more than
+  //    the ready stock of the product (tied to that delivery note)
+  origin?: 'manual' | 'pos' | 'delivery';
+  /** Fiche technique produced by this batch — feeds the product's ready stock. */
+  ficheTechnicId?: string;
+  /** Delivery note that triggered an automatic production. */
+  deliveryId?: string;
   saleId?: string;         // the POS sale that triggered this production
   saleReference?: string;  // its human reference (VNT-YYYY-000)
   // ---------- Perte (production loss) ----------
@@ -596,6 +607,17 @@ export interface CommandDeliveryItem {
   productName: string;
   quantity: number;
   sellUnit?: string;
+  /** Produit (fiche technique) livré sur cette ligne. */
+  ficheTechnicId?: string;
+  /** La ligne a été prise dans le STOCK PRÊT du produit (livraisons récentes). */
+  readyApplied?: boolean;
+  /** Quantité sortie du stock prêt existant. */
+  fromReady?: number;
+  /** Quantité produite automatiquement pour compléter la livraison. */
+  producedQuantity?: number;
+  /** Coût de revient unitaire du produit livré et coût de la ligne. */
+  unitCost?: number;
+  costAmount?: number;
 }
 
 /**
@@ -653,9 +675,112 @@ export interface CommandDelivery {
   /** Facture de vente générée par ce bon. */
   saleId?: string;
   saleReference?: string;
+  /** 'command' : créé depuis Commandes · 'livraison' : depuis l'écran Livraisons. */
+  source?: 'command' | 'livraison';
   items: CommandDeliveryItem[];
-  /** Matières premières déduites du stock par cette livraison. */
+  /** Matières premières déduites du stock par cette livraison (anciens bons). */
   consumptions?: CommandDeliveryConsumption[];
+  /** Quantité déjà récupérée sur ce bon (calculée à partir des récupérations). */
+  recoveredQuantity?: number;
+  /** Coût de revient de la marchandise récupérée (rapports). */
+  recoveredCost?: number;
+  createdBy?: string;
+}
+
+/* ============================================================================
+ *  RÉCUPÉRATION D'UN BON DE LIVRAISON
+ * ----------------------------------------------------------------------------
+ *  Le client rend tout ou partie de la marchandise livrée : la quantité revient
+ *  au STOCK PRÊT du produit et redevient « à livrer » sur sa commande, la
+ *  facture du bon baisse d'autant et l'argent qu'il avait payé au-delà lui est
+ *  rendu (sortie de caisse) ou reste à son compte (acompte).
+ * ========================================================================== */
+export interface DeliveryRecoveryItem {
+  commandItemId?: string;
+  ficheTechnicId?: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+  unit?: string;
+  readyApplied?: boolean;
+  unitCost?: number;
+  costAmount?: number;
+}
+
+export interface DeliveryRecovery {
+  id: string;
+  reference: string;
+  deliveryId: string;
+  commandId?: string;
+  clientId?: string;
+  clientName?: string;
+  date: string;
+  recoveredAt: string;
+  reason?: string;
+  tvaEnabled?: boolean;
+  tvaRate?: number;
+  totalHt: number;
+  tvaAmount: number;
+  totalTtc: number;
+  /** Argent payé que la facture n'appelle plus — revenu au client. */
+  excessAmount: number;
+  /** Part rendue en espèces (sortie de caisse). */
+  refundAmount: number;
+  refundMethod?: PaymentMethod;
+  refundId?: string;
+  isHistorical?: boolean;
+  items: DeliveryRecoveryItem[];
+  createdAt?: string;
+  createdBy?: string;
+}
+
+/* ============================================================================
+ *  FACTURE NON COMPTABILISÉE
+ * ----------------------------------------------------------------------------
+ *  Document seulement imprimé : il ne touche ni au stock, ni à la caisse, ni à
+ *  la dette du client, ni aux rapports.
+ * ========================================================================== */
+export type FreeInvoiceDocType = 'facture' | 'bon_livraison' | 'proforma';
+
+export interface FreeInvoiceLine {
+  ficheTechnicId?: string;
+  productName: string;
+  description?: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+export interface FreeInvoice {
+  id: string;
+  reference: string;
+  docType: FreeInvoiceDocType;
+  clientId?: string;
+  clientName: string;
+  clientPhone?: string;
+  clientAddress?: string;
+  clientRc?: string;
+  clientNif?: string;
+  clientNis?: string;
+  clientArticle?: string;
+  date: string;
+  location?: string;
+  driverName?: string;
+  driverPlate?: string;
+  tvaEnabled: boolean;
+  tvaRate: number;
+  reduction: number;
+  totalAmount: number;
+  tvaAmount: number;
+  finalAmount: number;
+  paidAmount: number;
+  restAmount: number;
+  paymentMode?: string;
+  notes?: string;
+  lines: FreeInvoiceLine[];
+  createdAt?: string;
   createdBy?: string;
 }
 

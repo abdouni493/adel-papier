@@ -26,6 +26,8 @@ const POS           = lazy(() => import('@/pages/POS'));
 const Sales         = lazy(() => import('@/pages/Sales'));
 const Clients       = lazy(() => import('@/pages/Clients'));
 const Commands      = lazy(() => import('@/pages/Clients/Commands'));
+const Deliveries    = lazy(() => import('@/pages/Deliveries'));
+const FreeInvoices  = lazy(() => import('@/pages/FreeInvoices'));
 const Suppliers     = lazy(() => import('@/pages/Suppliers'));
 const Workers       = lazy(() => import('@/pages/Workers'));
 const Expenses      = lazy(() => import('@/pages/Expenses'));
@@ -190,6 +192,8 @@ export default function App() {
           <Route path="/clients" element={<Guarded module="clients"><Clients /></Guarded>} />
           <Route path="/commands" element={<Guarded module="clients"><Commands /></Guarded>} />
           <Route path="/clients/commands" element={<Guarded module="clients"><Commands /></Guarded>} />
+          <Route path="/livraisons" element={<Guarded module="clients"><Deliveries /></Guarded>} />
+          <Route path="/factures-non-comptabilisees" element={<Guarded module="sales"><FreeInvoices /></Guarded>} />
           <Route path="/suppliers" element={<Guarded module="suppliers"><Suppliers /></Guarded>} />
           <Route path="/workers" element={<Guarded module="workers"><Workers /></Guarded>} />
           <Route path="/expenses" element={<Guarded module="expenses"><Expenses /></Guarded>} />
