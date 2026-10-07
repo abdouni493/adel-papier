@@ -425,7 +425,7 @@ end $$;
 
 /** Présentation d'un produit sur le site (nom, description, prix, image, masqué). */
 create or replace function public.website_update_product(p_id uuid, p_payload jsonb)
-returns void language plpgsql security definer set search_path = public as $
+returns void language plpgsql security definer set search_path = public as $$
 begin
   perform public.require_perm(array['website:edit','production:edit']);
   update public.fiche_technics set
@@ -436,7 +436,7 @@ begin
     web_hidden = case when p_payload ? 'web_hidden' then coalesce((p_payload->>'web_hidden')::boolean, false) else web_hidden end
   where id = p_id;
   if not found then raise exception 'Produit introuvable'; end if;
-end $;
+end $$;
 
 grant execute on function public.website_public() to anon, authenticated;
 grant execute on function public.website_place_order(jsonb) to anon, authenticated;
