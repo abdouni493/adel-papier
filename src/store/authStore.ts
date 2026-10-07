@@ -72,6 +72,11 @@ export const useAuthStore = create<AuthState>()(
 
           if (!error && data.user) {
             const profile = await fetchProfile(data.user.id);
+            // Un compte CLIENT (site web) n'a pas de profil : il n'ouvre jamais la gestion.
+            if (!profile && data.user.user_metadata?.role === 'client') {
+              await supabase.auth.signOut();
+              return false;
+            }
             const user: User = profile
               ? userFromProfile(profile)
               : {

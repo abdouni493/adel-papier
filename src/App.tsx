@@ -36,6 +36,10 @@ const CaisseReports = lazy(() => import('@/pages/Caisse/CaisseReports'));
 const ComptoirStats = lazy(() => import('@/pages/Caisse/ComptoirStats'));
 const Reports       = lazy(() => import('@/pages/Reports'));
 const SettingsPage  = lazy(() => import('@/pages/Settings'));
+const Website       = lazy(() => import('@/pages/Website'));
+const WebsiteOrders = lazy(() => import('@/pages/WebsiteOrders'));
+// Site public de commande — servi sous /site, sans connexion à la gestion.
+const SiteApp       = lazy(() => import('@/site/SiteApp'));
 
 import { useThemeStore, applyTheme } from '@/store/themeStore';
 import { hydrateFromSupabase } from '@/lib/sync';
@@ -174,6 +178,7 @@ export default function App() {
       )}
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/site/*" element={<Suspense fallback={<ScreenLoader />}><SiteApp /></Suspense>} />
         <Route path="/no-access" element={<PrivateRoute><NoAccess /></PrivateRoute>} />
         <Route
           element={
@@ -204,6 +209,8 @@ export default function App() {
           <Route path="/caisse/reports" element={<Guarded module="caisse"><CaisseReports /></Guarded>} />
           <Route path="/caisse/statistics" element={<Guarded module="caisse"><ComptoirStats /></Guarded>} />
           <Route path="/reports" element={<Guarded module="reports"><Reports /></Guarded>} />
+          <Route path="/site-web" element={<Guarded module="website"><Website /></Guarded>} />
+          <Route path="/commandes-site" element={<Guarded module="website"><WebsiteOrders /></Guarded>} />
           <Route path="/settings" element={<Guarded module="settings"><SettingsPage /></Guarded>} />
           <Route path="/" element={<HomeRedirect />} />
         </Route>

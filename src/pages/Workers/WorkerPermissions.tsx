@@ -28,6 +28,7 @@ const moduleActions: Record<string, Array<'view' | 'create' | 'edit' | 'delete' 
   caisse: ['view', 'create', 'edit', 'delete'],
   reports: ['view'],
   settings: ['view'],
+  website: ['view', 'create', 'edit', 'delete'],
 };
 
 const actionLabels: Record<string, string> = {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   HandCoins, History, Undo2, Eye, Pencil, Printer, Trash2, Wallet, Coins,
-  ShoppingBag, ClipboardList, Truck, ScissorsSquare, TrendingUp, Package, PiggyBank, RotateCcw,
+  ShoppingBag, ClipboardList, Truck, ScissorsSquare, TrendingUp, Package, PiggyBank, RotateCcw, Globe,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -36,6 +36,7 @@ import type {
   Client, PartyOldDebt, PartyPayment, Sale, PartyCreditRefund, CommandAdjustment, DeliveryRecovery,
 } from '@/types';
 import type { Command } from '@/store/commandStore';
+import { useWebsiteStore, ORDER_STATUS_LABEL, type WebsiteOrder } from '@/store/websiteStore';
 
 /* ============================================================================
  *  HISTORIQUE COMPLET D'UN CLIENT
@@ -112,6 +113,7 @@ export function ClientHistoryScreen({
   const adjustments = useCommandStore((s) => s.adjustments);
   const recoveries = useCommandStore((s) => s.recoveries);
   const deleteRecovery = useCommandStore((s) => s.deleteRecovery);
+  const websiteOrders = useWebsiteStore((s) => s.orders);
   const deleteCommand = useCommandStore((s) => s.deleteCommand);
   const deleteDelivery = useCommandStore((s) => s.deleteDelivery);
   const deleteAdjustment = useCommandStore((s) => s.deleteAdjustment);
@@ -715,6 +717,32 @@ export function ClientHistoryScreen({
       },
     });
 
+  // Commandes passees sur le site : acceptees (devenues commandes) ou annulees.
+  const webOrders = websiteOrders.filter((o) => o.clientId === client.id);
+  const webOrderColumns: DataColumn<WebsiteOrder>[] = [
+    { key: 'date', label: 'Date et heure', render: (o) => formatDateTime(o.createdAt, language) },
+    { key: 'ref', label: 'Reference', render: (o) => <span className="font-mono font-semibold">{o.reference}</span> },
+    {
+      key: 'status', label: 'Etat',
+      render: (o) => (
+        <Badge variant={o.status === 'accepted' ? 'success' : o.status === 'cancelled' ? 'danger' : 'warning'}>
+          {ORDER_STATUS_LABEL[o.status]}
+        </Badge>
+      ),
+    },
+    {
+      key: 'items', label: 'Produits',
+      render: (o) => o.items.map((i) => `${i.productName} × ${i.quantity}`).join(', '),
+    },
+    { key: 'total', label: 'Total', render: (o) => money(o.totalAmount) },
+    {
+      key: 'info', label: 'Traitement',
+      render: (o) => o.status === 'cancelled'
+        ? (o.cancelReason || 'Annulee')
+        : o.acceptedAt ? `Acceptee le ${formatDateTime(o.acceptedAt, language)}` : '—',
+    },
+  ];
+
   const recoveryColumns: DataColumn<DeliveryRecovery>[] = [
     { key: 'date', label: 'Date et heure', render: (r) => formatDateTime(r.recoveredAt, language) },
     { key: 'ref', label: 'N', render: (r) => <span className="font-semibold">{r.reference}</span> },
@@ -1062,6 +1090,24 @@ export function ClientHistoryScreen({
       note:
         "Marchandise rendue par le client sur un bon de livraison : elle revient au stock pret, la facture du bon "
         + "baisse et l'argent paye en trop lui est rendu (ou reste en acompte).",
+    },
+    {
+      key: 'webOrders', label: 'Commandes site web', icon: <Globe size={14} />,
+      rows: webOrders as never[],
+      columns: webOrderColumns as DataColumn<never>[],
+      actions: (() => []) as unknown as (row: never, i: number) => ActionItem[],
+      stats: [
+        { label: 'Commandes web', value: String(webOrders.length), icon: <Globe size={12} /> },
+        { label: 'Acceptees', value: String(webOrders.filter((o) => o.status === 'accepted').length), tone: 'pos' },
+        { label: 'Annulees', value: String(webOrders.filter((o) => o.status === 'cancelled').length), tone: 'neg' },
+        { label: 'Montant accepte', value: money(sum(webOrders.filter((o) => o.status === 'accepted').map((o) => o.totalAmount))) },
+      ],
+      dateOf: (r: never) => (r as unknown as WebsiteOrder).createdAt,
+      searchOf: (r: never) => {
+        const x = r as unknown as WebsiteOrder;
+        return `${x.reference} ${x.items.map((i) => i.productName).join(' ')}`;
+      },
+      empty: 'Aucune commande passee sur le site par ce client',
     },
     {
       key: 'adjustments', label: 'Annulations / augmentations', icon: <ScissorsSquare size={14} />,

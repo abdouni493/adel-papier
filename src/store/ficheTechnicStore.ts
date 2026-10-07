@@ -23,6 +23,12 @@ export interface FicheTechnic {
   totalGains: number;
   /** Photo du produit (bucket « product-images ») — reprise sur la liste des prix. */
   imageUrl?: string;
+  /** Présentation sur le site web (vide = valeurs de la fiche). */
+  webName?: string;
+  webDescription?: string;
+  webPrice?: number;
+  webImageUrl?: string;
+  webHidden?: boolean;
   createdAt: string;
 }
 

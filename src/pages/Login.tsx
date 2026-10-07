@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Lock, User, Eye, EyeOff, UserPlus, Sun, Moon, LogIn, Layers, ScrollText, ShieldCheck } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, UserPlus, Sun, Moon, LogIn, Layers, ScrollText, ShieldCheck, Globe } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useThemeStore } from '@/store/themeStore';
@@ -181,6 +181,12 @@ export default function Login() {
       {/* ---------------- Form panel ---------------- */}
       <div className="relative flex items-center justify-center p-5 sm:p-10 bg-gradient-hero">
         <div className="absolute top-5 right-5 z-20 flex gap-2">
+          <a
+            href="/site" target="_blank" rel="noreferrer" title="Ouvrir le site web"
+            className="h-10 px-3 inline-flex items-center gap-2 rounded-md border border-[--border-input] bg-chocolate text-sm font-semibold text-text-secondary hover:border-gold/60 hover:text-gold transition-colors"
+          >
+            <Globe size={16} /> Site web
+          </a>
           <button
             onClick={toggleTheme}
             aria-label={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}

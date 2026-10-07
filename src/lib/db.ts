@@ -172,6 +172,7 @@ const toClient = (r: any): Client => ({
   id: r.id, name: r.name, phone: r.phone ?? '', address: r.address ?? '', note: r.note ?? '',
   rc: r.rc ?? '', nif: r.nif ?? '', nis: r.nis ?? '', article: r.article ?? '',
   creditAmount: num(r.credit_amount),
+  loginEmail: r.login_email ?? '',
 });
 
 /** Only the keys actually present are sent, so a partial edit never wipes a column. */
@@ -736,6 +737,11 @@ const toFiche = (r: any): FicheTechnic => ({
   gainsPerUnit: num(r.gains_per_unit),
   totalGains: num(r.total_gains),
   imageUrl: r.image_url ?? undefined,
+  webName: r.web_name ?? '',
+  webDescription: r.web_description ?? '',
+  webPrice: r.web_price == null ? undefined : num(r.web_price),
+  webImageUrl: r.web_image_url ?? '',
+  webHidden: r.web_hidden ?? false,
   createdAt: (r.created_at ?? '').slice(0, 10),
   usedProducts: (r.fiche_technic_lines ?? []).map((l: any) => ({
     productId: l.product_id ?? '',

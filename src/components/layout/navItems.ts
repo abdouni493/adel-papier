@@ -1,7 +1,7 @@
 import {
   Gauge, PackageSearch, Cog, ShoppingBasket, ReceiptText, ScanBarcode,
   Contact, ClipboardCheck, Container, UsersRound, HandCoins, Vault,
-  ChartNoAxesCombined, SlidersHorizontal, Truck, FileText,
+  ChartNoAxesCombined, SlidersHorizontal, Truck, FileText, Globe, ShoppingCart,
 } from 'lucide-react';
 import type { PermissionModule } from '@/types';
 import type { TranslationKey } from '@/lib/i18n';
@@ -31,6 +31,8 @@ export const navItems: NavItem[] = [
   { to: '/commands', key: 'commands', module: 'clients', icon: ClipboardCheck, group: 'commercial' },
   { to: '/livraisons', key: 'deliveries', module: 'clients', icon: Truck, group: 'commercial' },
   { to: '/factures-non-comptabilisees', key: 'freeInvoices', module: 'sales', icon: FileText, group: 'commercial' },
+  { to: '/site-web', key: 'website', module: 'website', icon: Globe, group: 'commercial' },
+  { to: '/commandes-site', key: 'websiteCommands', module: 'website', icon: ShoppingCart, group: 'commercial' },
   { to: '/suppliers', key: 'suppliers', module: 'suppliers', icon: Container, group: 'production' },
   { to: '/workers', key: 'workers', module: 'workers', icon: UsersRound, group: 'gestion' },
   { to: '/expenses', key: 'expenses', module: 'expenses', icon: HandCoins, group: 'gestion' },

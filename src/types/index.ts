@@ -144,6 +144,8 @@ export interface Client {
    * POSITIF en sa faveur (« il a un crédit sur l'entreprise »).
    */
   creditAmount?: number;
+  /** E-mail de connexion au site web (compte client), vide sans accès. */
+  loginEmail?: string;
 }
 
 export interface ClientDebtVersement {
@@ -498,6 +500,7 @@ export const PERMISSION_MODULES = [
   'caisse',
   'reports',
   'settings',
+  'website',
 ] as const;
 
 export type PermissionModule = (typeof PERMISSION_MODULES)[number];

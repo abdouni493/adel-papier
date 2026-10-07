@@ -19,7 +19,8 @@ import { ViewToggle } from '@/components/ui/ViewToggle';
 import { DataTable, useViewMode, type DataColumn } from '@/components/ui/DataTable';
 import type { ActionItem } from '@/components/ui/ActionMenu';
 import { StatCard } from '@/components/shared/StatCard';
-import { ClientForm } from '@/components/shared/ClientForm';
+import { ClientForm, type ClientAccountInput } from '@/components/shared/ClientForm';
+import { useWebsiteStore } from '@/store/websiteStore';
 import { VersementModal } from '@/components/shared/VersementModal';
 import { ClientStatementModal } from '@/components/shared/ClientStatementModal';
 import { ClientHistoryScreen } from '@/components/shared/ClientHistoryScreen';
@@ -75,6 +76,8 @@ const EMPTY_CLIENT_STATS: ClientStats = {
 export default function ClientsPage() {
   const { can } = usePermissions();
   const navigate = useNavigate();
+  const setClientAccount = useWebsiteStore((s) => s.setClientAccount);
+  const removeClientAccount = useWebsiteStore((s) => s.removeClientAccount);
   const {
     clients, payments, oldDebts, refunds, addClient, updateClient, deleteClient,
     payDebt, addOldDebt, updateOldDebt, refundCredit,
@@ -182,13 +185,29 @@ export default function ClientsPage() {
     };
   }, [statsByClient]);
 
-  const handleSubmit = async (data: Omit<Client, 'id'>) => {
+  const handleSubmit = async (data: Omit<Client, 'id'>, account?: ClientAccountInput) => {
+    let clientId: string;
     if (editing) {
       await updateClient(editing.id, data);
+      clientId = editing.id;
       toast.success('Client modifié');
     } else {
-      await addClient(data);
+      clientId = (await addClient(data)).id;
       toast.success('Client créé');
+    }
+    // accès au site web : création / modification / suppression du compte
+    if (account) {
+      try {
+        if (account.enabled) {
+          await setClientAccount(clientId, account.email, account.password);
+          toast.success('Accès au site enregistré');
+        } else if (editing?.loginEmail) {
+          await removeClientAccount(clientId);
+          toast.success('Accès au site supprimé');
+        }
+      } catch (e) {
+        toast.error("Accès au site : " + (e as Error).message);
+      }
     }
     setFormOpen(false);
     setEditing(null);
@@ -561,7 +580,7 @@ export default function ClientsPage() {
 
       {/* ---- Create / edit ---- */}
       <Modal open={formOpen} onClose={() => setFormOpen(false)} title={editing ? 'Modifier le client' : 'Nouveau client'} size="sm">
-        <ClientForm initial={editing} onSubmit={handleSubmit} onCancel={() => setFormOpen(false)} />
+        <ClientForm withAccount initial={editing} onSubmit={handleSubmit} onCancel={() => setFormOpen(false)} />
       </Modal>
 
       {/* ---- HISTORIQUE COMPLET (plein écran) ---- */}

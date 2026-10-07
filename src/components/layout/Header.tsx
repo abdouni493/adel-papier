@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, Languages, Sun, Moon } from 'lucide-react';
+import { Menu, Languages, Sun, Moon, Globe } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useThemeStore } from '@/store/themeStore';
@@ -40,6 +40,13 @@ export function Header({ onMenuClick }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-2">
+        {/* Site web public — nouvel onglet */}
+        <a
+          href="/site" target="_blank" rel="noreferrer" title="Ouvrir le site web"
+          className="h-10 px-3 inline-flex items-center gap-2 rounded-md border border-[--border-input] bg-chocolate text-sm font-semibold text-text-secondary hover:border-gold/60 hover:text-gold transition-colors"
+        >
+          <Globe size={16} /> <span className="hidden sm:inline">Site web</span>
+        </a>
         {/* Theme toggle — icon swaps with a rotate/fade */}
         <button
           onClick={toggleTheme}
