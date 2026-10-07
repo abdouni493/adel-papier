@@ -111,6 +111,8 @@ export interface DocData {
   signatures?: string[];
   /** Nom du fichier / onglet d'impression. */
   fileName: string;
+  /** En-tête réduit au logo + raison sociale (bon de livraison). */
+  minimalHeader?: boolean;
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -165,30 +167,36 @@ export const BRAND_CSS = `
   .toolbar button.ghost { background: #fff; color: ${BRAND.goldDark}; }
 `;
 
-/** En-tête officiel — identique sur les documents et sur les comptes rendus. */
+/** En-tête officiel — identique sur les documents et sur les comptes rendus.
+ *  Logo à GAUCHE, raison sociale + activité puis coordonnées alignées à DROITE. */
 export const HEAD_CSS = `
   .head {
     border: 1.6px solid ${BRAND.grid}; border-top: 6px solid ${BRAND.gold};
-    background: ${BRAND.wash}; padding: 11px 13px;
+    background: ${BRAND.wash}; padding: 12px 16px;
   }
-  .head .row { display: flex; align-items: center; gap: 12px; }
-  .head .info {
-    flex: 0 0 28%; max-width: 28%; text-align: left;
-    font-size: 11.5px; font-weight: 700; line-height: 1.55;
-    color: ${BRAND.inkSoft}; text-transform: uppercase; overflow-wrap: anywhere;
-  }
-  .head .center { flex: 1 1 auto; min-width: 0; text-align: center; }
-  .head .logo-box { flex: 0 0 28%; max-width: 28%; text-align: right; }
-  .head .logo { width: 108px; height: 108px; object-fit: contain; display: inline-block; }
+  .head .row { display: flex; align-items: center; gap: 18px; }
+  .head .logo-box { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-start; }
+  .head .logo { width: 138px; height: 138px; object-fit: contain; display: block; }
+  .head .right { flex: 1 1 auto; min-width: 0; text-align: right; }
   .head .brand {
-    font-size: 27px; font-weight: 800; letter-spacing: .6px; line-height: 1.15;
+    font-size: 26px; font-weight: 900; letter-spacing: .6px; line-height: 1.15;
     text-transform: uppercase; color: ${BRAND.ink};
   }
-  .head .rule { width: 62%; margin: 7px auto 0; border-top: 2.5px solid ${BRAND.gold}; }
   .head .activity {
-    font-size: 15.5px; font-weight: 700; letter-spacing: .3px; margin-top: 6px;
-    line-height: 1.25; text-transform: uppercase; color: ${BRAND.ink};
+    font-size: 14px; font-weight: 800; letter-spacing: .3px; margin-top: 3px;
+    line-height: 1.25; text-transform: uppercase; color: ${BRAND.goldDark};
   }
+  .head .rule { margin: 7px 0 7px auto; width: 100%; border-top: 2.5px solid ${BRAND.gold}; }
+  .head .info {
+    display: grid; grid-template-columns: auto auto; justify-content: end;
+    column-gap: 20px; row-gap: 2px;
+    font-size: 11.5px; font-weight: 800; line-height: 1.45;
+    color: ${BRAND.ink}; text-transform: uppercase;
+  }
+  .head .info .it { text-align: right; overflow-wrap: anywhere; }
+  .head .info .it b { color: ${BRAND.goldDark}; font-weight: 900; }
+  .head .info .full { grid-column: 1 / -1; }
+  .head.mini .brand { font-size: 28px; }
   .city { text-align: right; font-size: 14px; font-weight: 700; font-style: italic; text-transform: uppercase; margin: 8px 2px 0; }
   .doc-title {
     text-align: center; font-size: 22px; font-weight: 800; text-transform: uppercase;
@@ -265,18 +273,24 @@ const CSS = `
   }
 `;
 
-/** Coordonnées et identifiants fiscaux — colonne de GAUCHE de l'en-tête. */
+/** Coordonnées et identifiants fiscaux de l'en-tête : [libellé, valeur, pleine largeur ?]. */
+export function headerInfoItems(store: StoreSettings): [string, string, boolean][] {
+  const items: [string, string, boolean][] = [
+    ['LIEU D\'ACTIVITE', store.activityPlace, true],
+    ['SIEGE SOCIAL', store.address, true],
+    ['TEL', store.phone, false],
+    ['EMAIL', store.email, false],
+    ['R.C', store.rc, false],
+    ['NIF', store.nif, false],
+    ['NIS', store.nis, false],
+    ['ART', store.article, false],
+  ];
+  return items.filter(([, v]) => v && v.trim());
+}
+
+/** Version texte (une ligne par information). */
 export function headerInfoLines(store: StoreSettings): string[] {
-  return [
-    store.activityPlace ? `LIEU D'ACTIVITE : ${store.activityPlace}` : '',
-    store.address ? `SIEGE SOCIAL : ${store.address}` : '',
-    store.phone ? `TEL : ${store.phone}` : '',
-    store.email ? `EMAIL : ${store.email}` : '',
-    store.rc ? `R.C : ${store.rc}` : '',
-    store.nif ? `NIF : ${store.nif}` : '',
-    store.nis ? `NIS : ${store.nis}` : '',
-    store.article ? `ART : ${store.article}` : '',
-  ].filter(Boolean);
+  return headerInfoItems(store).map(([l, v]) => `${l} : ${v}`);
 }
 
 /** Ville de la mention « <VILLE> LE … » — réglage, sinon fin de l'adresse. */
@@ -286,22 +300,40 @@ export function headerCity(store: StoreSettings): string {
   return (parts[parts.length - 1] || '').toUpperCase();
 }
 
-/** Bloc d'en-tête complet : infos à gauche, raison sociale au centre, logo à droite. */
-export function headerHtml(store: StoreSettings): string {
+/**
+ * Bloc d'en-tête : logo à GAUCHE, raison sociale, activité et coordonnées à
+ * DROITE. `minimal` (bon de livraison) n'imprime que le logo et le nom.
+ */
+export function headerHtml(store: StoreSettings, minimal = false): string {
+  const info = minimal
+    ? ''
+    : `<div class="rule"></div><div class="info">${headerInfoItems(store)
+        .map(([l, v, full]) => `<div class="it${full ? ' full' : ''}"><b>${esc(l)} :</b> ${esc(v)}</div>`)
+        .join('')}</div>`;
   return `
-    <div class="head">
+    <div class="head${minimal ? ' mini' : ''}">
       <div class="row">
-        <div class="info">${headerInfoLines(store).map(esc).join('<br/>')}</div>
-        <div class="center">
-          <div class="brand">${esc(store.name || 'PAPETERIE PRODUCTION')}</div>
-          <div class="rule"></div>
-          ${store.description ? `<div class="activity">${esc(store.description)}</div>` : ''}
-        </div>
         <div class="logo-box">
           ${store.logo ? `<img class="logo" src="${store.logo}" alt=""/>` : ''}
         </div>
+        <div class="right">
+          <div class="brand">${esc(store.name || 'PAPETERIE PRODUCTION')}</div>
+          ${!minimal && store.description ? `<div class="activity">${esc(store.description)}</div>` : ''}
+          ${info}
+        </div>
       </div>
     </div>`;
+}
+
+/** La colonne « ADRESSE (DE LIVRAISON) » n'est plus imprimée sur aucun document. */
+function dropAddressColumn(t: DocTable): DocTable {
+  const idx = t.columns.findIndex((c) => /^adresse/i.test(c.label.trim()));
+  if (idx < 0) return t;
+  return {
+    ...t,
+    columns: t.columns.filter((_, i) => i !== idx),
+    rows: t.rows.map((r) => (r.span ? r : { ...r, cells: r.cells.filter((_, i) => i !== idx) })),
+  };
 }
 
 function alignClass(a?: Align): string {
@@ -366,7 +398,8 @@ function tableHtml(t: DocTable): string {
  * Tous les modèles de l'application passent par ici : l'entreprise a un seul
  * papier à en-tête, quel que soit le document.
  */
-export function printOfficialDocument(data: DocData, store: StoreSettings) {
+export function printOfficialDocument(input: DocData, store: StoreSettings) {
+  const data: DocData = { ...input, tables: input.tables.map(dropAddressColumn) };
   const signs = data.signatures?.length ? data.signatures : ['Signature'];
   // Modèle papier : le premier cartouche à GAUCHE, le dernier à DROITE.
   const leftSign = signs.length > 1 ? signs[0] : '';
@@ -382,7 +415,7 @@ export function printOfficialDocument(data: DocData, store: StoreSettings) {
       <button class="ghost" onclick="window.close()">Fermer</button>
     </div>
     <div class="sheet">
-      ${headerHtml(store)}
+      ${headerHtml(store, data.minimalHeader)}
       <div class="city">${city ? `${esc(city)} LE ` : 'LE '}${esc(formatDate(data.docDate))}</div>
       <div class="doc-title"><span>${esc(data.title)}</span></div>
       <div class="party">
@@ -416,7 +449,7 @@ export function printOfficialDocument(data: DocData, store: StoreSettings) {
         <div class="col right"><div class="sign">${esc(rightSign)}</div></div>
       </div>
       ${data.endText?.trim() ? `<div class="endtext">${esc(data.endText.trim())}</div>` : ''}
-      ${store.socialMedia ? `<div class="tag">${esc(store.socialMedia)}</div>` : ''}
+      ${!data.minimalHeader && store.socialMedia ? `<div class="tag">${esc(store.socialMedia)}</div>` : ''}
     </div>
     <script>window.onload=function(){setTimeout(function(){window.print();},350);};<\/script>
   </body>

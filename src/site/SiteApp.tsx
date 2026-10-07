@@ -8,7 +8,7 @@ import {
 import '@fontsource/playfair-display/700.css';
 import '@fontsource/playfair-display/800.css';
 import './site.css';
-import { useSite, useT, money, type SiteProduct, type SiteText } from './siteStore';
+import { useSite, useT, type SiteProduct, type SiteText } from './siteStore';
 import { siteSupabase } from './siteClient';
 import type { SiteLang } from './i18n';
 
@@ -353,9 +353,7 @@ function ProductCard({ p, index, onOpen }: { p: SiteProduct; index: number; onOp
         <div className="px-3 pt-2.5 pb-1 flex-1 flex flex-col">
           {p.category && <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[var(--red)] truncate">{p.category}</span>}
           <h3 className="font-semibold text-sm sm:text-base leading-snug line-clamp-2">{p.name}</h3>
-          <p className="mt-auto pt-1.5 font-serif-display text-base sm:text-xl font-extrabold tabular-nums">
-            {money(p.price)}{p.unit && <span className="font-sans text-[11px] font-medium text-[var(--ink-muted)]"> / {p.unit}</span>}
-          </p>
+          {p.unit && <p className="mt-auto pt-1.5 text-[11px] font-medium text-[var(--ink-muted)]">{p.unit}</p>}
         </div>
       </button>
       <div className="grid grid-cols-[44px_1fr] sm:grid-cols-2 gap-1.5 p-2 pt-1">
@@ -413,9 +411,7 @@ function ProductSheet({ p, onClose }: { p: SiteProduct | null; onClose: () => vo
             <div className="p-6 flex flex-col gap-4">
               {p.category && <span className="text-xs font-bold uppercase tracking-wider text-[var(--red)]">{p.category}</span>}
               <h2 className="font-serif-display text-2xl sm:text-3xl font-extrabold leading-tight">{p.name}</h2>
-              <p className="font-serif-display text-2xl font-extrabold text-[var(--red)] tabular-nums">
-                {money(p.price)}{p.unit && <span className="font-sans text-sm font-medium text-[var(--ink-muted)]"> / {p.unit}</span>}
-              </p>
+              {p.unit && <p className="text-sm font-medium text-[var(--ink-muted)]">{p.unit}</p>}
               {p.description && <p className="ruled text-[var(--ink-soft)] whitespace-pre-line">{p.description}</p>}
               <div className="mt-auto space-y-3">
                 <QtyControl value={qty} onChange={setQty} />
@@ -468,7 +464,7 @@ function Offers() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} className="site-input !ps-10 !rounded-full" />
         </div>
         <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Tri" className="site-input sm:!w-52 !rounded-full">
-          <option value="name">A → Z</option><option value="asc">{t('price')} ↑</option><option value="desc">{t('price')} ↓</option>
+          <option value="name">A → Z</option>
         </select>
       </div>
       {cats.length > 0 && (
@@ -585,7 +581,6 @@ function OrderPage() {
 
   const lines = cart.map((l) => ({ ...l, p: products.find((p) => p.id === l.id) })).filter((l) => l.p) as
     { id: string; quantity: number; p: SiteProduct }[];
-  const total = lines.reduce((a, l) => a + l.quantity * l.p.price, 0);
   const suggestions = q.trim()
     ? products.filter((p) => `${p.name} ${p.category}`.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 6)
     : [];
@@ -614,7 +609,6 @@ function OrderPage() {
         <p className="mt-2 text-[var(--ink-soft)]">{t('orderThanks')}</p>
         <div className="paper-card mt-6 p-5 text-start space-y-1">
           <p className="flex justify-between"><span>{t('orderRef')}</span><strong className="font-mono">{done.reference}</strong></p>
-          <p className="flex justify-between"><span>{t('total')}</span><strong className="tabular-nums">{money(done.total)}</strong></p>
         </div>
         <Link to="/site/offres" className="site-btn site-btn-red mt-8">{t('continueShopping')}</Link>
       </section>
@@ -646,7 +640,6 @@ function OrderPage() {
                     className="w-full flex items-center gap-3 p-2.5 text-start hover:bg-[var(--red-soft)]">
                     <span className="h-11 w-11 rounded bg-[var(--paper-2)] overflow-hidden shrink-0">{p.image && <img src={p.image} alt="" className="h-full w-full object-cover" />}</span>
                     <span className="flex-1 min-w-0 font-semibold truncate">{p.name}</span>
-                    <span className="text-sm tabular-nums">{money(p.price)}</span>
                     <Plus size={18} className="text-[var(--red)]" />
                   </button>
                 ))}
@@ -670,10 +663,9 @@ function OrderPage() {
                   </div>
                   <div className="flex-1 min-w-[8rem]">
                     <p className="font-semibold leading-snug">{l.p.name}</p>
-                    <p className="text-sm text-[var(--ink-muted)] tabular-nums">{t('unitPrice')} : {money(l.p.price)}{l.p.unit && ` / ${l.p.unit}`}</p>
+                    {l.p.unit && <p className="text-sm text-[var(--ink-muted)]">{l.p.unit}</p>}
                   </div>
                   <QtyControl value={l.quantity} onChange={(v) => setQty(l.id, v)} />
-                  <p className="w-32 text-end font-bold tabular-nums">{money(l.quantity * l.p.price)}</p>
                   <button onClick={() => removeFromCart(l.id)} aria-label={t('remove')} className="h-11 w-11 rounded-full flex items-center justify-center text-[var(--ink-muted)] hover:bg-[var(--red-soft)] hover:text-[var(--red)]"><Trash2 size={18} /></button>
                 </motion.div>
               ))}
@@ -716,13 +708,9 @@ function OrderPage() {
           <div className="border-t border-dashed border-black/20 pt-4 space-y-1.5">
             {lines.map((l) => (
               <p key={l.id} className="flex justify-between gap-3 text-sm text-[var(--ink-soft)]">
-                <span className="truncate">{l.p.name} × {l.quantity}</span><span className="tabular-nums">{money(l.quantity * l.p.price)}</span>
+                <span className="truncate">{l.p.name}</span><span className="tabular-nums">× {l.quantity}</span>
               </p>
             ))}
-            <p className="flex justify-between items-baseline pt-2">
-              <span className="font-bold">{t('grandTotal')}</span>
-              <span className="font-serif-display text-2xl font-extrabold text-[var(--red)] tabular-nums">{money(total)}</span>
-            </p>
           </div>
           {error && <p role="alert" className="rounded-lg bg-[var(--red-soft)] text-[var(--red-dark)] text-sm p-3">{error}</p>}
           <button type="submit" disabled={busy || lines.length === 0} className="site-btn site-btn-red w-full !min-h-[52px] text-base">

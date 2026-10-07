@@ -45,6 +45,7 @@ export function printDeliveryFor(
       docTitle,
       endText,
       reference: delivery.reference,
+      blNumber: delivery.blNumber,
       commandReference: command?.reference ?? '',
       bonNumber: command?.bonNumber,
       clientName: command?.clientName ?? client?.name ?? '',

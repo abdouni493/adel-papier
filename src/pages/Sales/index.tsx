@@ -95,6 +95,8 @@ export default function SalesPage() {
     const cl = clients.find((c) => c.id === s.clientId);
     printSaleInvoice({
       reference: s.reference,
+      invoiceNumber: s.invoiceNumber,
+      invoiceYear: s.invoiceYear,
       date: s.date,
       deliveryReference: deliveryOf(s)?.reference,
       commandReference: commandOf(s)?.reference,

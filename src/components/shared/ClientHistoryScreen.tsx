@@ -199,6 +199,8 @@ export function ClientHistoryScreen({
     printSaleInvoice(
       {
         reference: s.reference,
+        invoiceNumber: s.invoiceNumber,
+        invoiceYear: s.invoiceYear,
         date: s.date,
         client: {
           name: client.name, phone: client.phone, address: client.address,
@@ -262,6 +264,7 @@ export function ClientHistoryScreen({
         docTitle,
         endText,
         reference: d.reference,
+        blNumber: d.blNumber,
         commandReference: c?.reference ?? '',
         bonNumber: c?.bonNumber,
         clientName: client.name,

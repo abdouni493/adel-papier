@@ -150,6 +150,8 @@ export interface ClientDeliveryInput {
   /** Acompte LIBRE du client à utiliser sur les factures créées. */
   creditUsed?: number;
   lines: ClientDeliveryLineInput[];
+  /** Quantités livrées HORS commande : une commande est créée pour elles. */
+  directLines?: (ClientDeliveryLineInput & { unitPrice: number; sellByUnit?: boolean; sellUnit?: string })[];
 }
 
 /** Récupération de marchandise saisie sur un bon de livraison. */
@@ -313,6 +315,16 @@ const clientDeliveryPayload = (i: ClientDeliveryInput) => ({
       fiche_technic_id: l.ficheTechnicId ?? null,
       product_name: l.productName,
       quantity: l.quantity,
+    })),
+  direct_lines: (i.directLines ?? [])
+    .filter((l) => l.quantity > 0)
+    .map((l) => ({
+      fiche_technic_id: l.ficheTechnicId ?? null,
+      product_name: l.productName,
+      quantity: l.quantity,
+      unit_price: l.unitPrice,
+      sell_by_unit: !!l.sellByUnit,
+      sell_unit: l.sellUnit ?? null,
     })),
 });
 

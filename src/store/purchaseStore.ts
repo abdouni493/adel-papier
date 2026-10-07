@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Purchase } from '@/types';
+import type { Purchase, PurchaseReturn } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
 import { todayISO } from '@/lib/utils';
@@ -35,8 +35,19 @@ export interface UpdatePurchaseInput {
   products?: Purchase['products'];
 }
 
+/** Retour d'achat saisi : quantités rendues par ligne de la facture. */
+export interface PurchaseReturnInput {
+  purchaseId: string;
+  date: string;
+  reason?: string;
+  items: { purchaseLineId: string; quantity: number }[];
+}
+
 interface PurchaseState {
   purchases: Purchase[];
+  returns: PurchaseReturn[];
+  addReturn: (input: PurchaseReturnInput) => Promise<PurchaseReturn | undefined>;
+  deleteReturn: (id: string) => Promise<void>;
   load: () => Promise<void>;
   addPurchase: (p: AddPurchaseInput) => Promise<Purchase>;
   /** Edits an invoice — header AND lines; the stock follows the correction. */
@@ -54,8 +65,42 @@ export const usePurchaseStore = create<PurchaseState>()((set, get) => {
 
   return {
     purchases: [],
+    returns: [],
 
-    load: async () => set({ purchases: await db.purchases.list() }),
+    load: async () => {
+      const [purchases, returns] = await Promise.all([db.purchases.list(), db.purchaseReturns.list()]);
+      set({ purchases, returns });
+    },
+
+    addReturn: async (input) => {
+      const row = await save<{ id: string }>('purchases.return', () =>
+        rpc.createPurchaseReturn({
+          purchase_id: input.purchaseId,
+          date: input.date,
+          reason: input.reason ?? '',
+          items: input.items
+            .filter((i) => i.quantity > 0)
+            .map((i) => ({ purchase_line_id: i.purchaseLineId, quantity: i.quantity })),
+        })
+      );
+      const [purchases, returns] = await Promise.all([db.purchases.list(), db.purchaseReturns.list()]);
+      set({ purchases, returns });
+      await Promise.all([
+        useStockStore.getState().load(),
+        useCaisseStore.getState().load(),
+      ]).catch(() => undefined);
+      return returns.find((r) => r.id === row?.id);
+    },
+
+    deleteReturn: async (id) => {
+      await save('purchases.return.delete', () => db.purchaseReturns.remove(id));
+      const [purchases, returns] = await Promise.all([db.purchases.list(), db.purchaseReturns.list()]);
+      set({ purchases, returns });
+      await Promise.all([
+        useStockStore.getState().load(),
+        useCaisseStore.getState().load(),
+      ]).catch(() => undefined);
+    },
 
     addPurchase: async (p) => {
       const total =

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from './supabase';
 import type {
-  Product, Marque, Category, Unit, Supplier, Client, ClientDebt, Sale, Purchase,
+  Product, Marque, Category, Unit, Supplier, Client, ClientDebt, Sale, Purchase, PurchaseReturn,
   Production, ComptoirItem, Destruction, Worker, Role, Expense, CaisseTransaction,
   CaisseReport, StoreSettings, PartyPayment, CommandDelivery, WorkerOvertime,
   PurchaseOrder, PaymentMethodDetails, PartyOldDebt, PartyCreditRefund, PartyType,
@@ -288,6 +288,7 @@ const toCommandDelivery = (r: any): CommandDelivery => ({
   id: r.id,
   commandId: r.command_id,
   reference: r.reference,
+  blNumber: r.bl_number ?? undefined,
   date: r.date,
   deliveredAt: r.delivered_at ?? r.created_at,
   notes: r.notes ?? '',
@@ -460,6 +461,7 @@ const toPurchase = (r: any): Purchase => ({
   allocatedAmount: num(r.allocated_amount),
   createdBy: r.created_by ?? undefined,
   products: (r.purchase_lines ?? []).map((l: any) => ({
+    lineId: l.id,
     productId: l.product_id ?? '',
     productName: l.product_name,
     quantity: num(l.quantity),
@@ -475,9 +477,33 @@ const toPurchase = (r: any): Purchase => ({
   })),
 });
 
+const toPurchaseReturn = (r: any): PurchaseReturn => ({
+  id: r.id,
+  reference: r.reference,
+  purchaseId: r.purchase_id,
+  supplierId: r.supplier_id ?? '',
+  date: r.date,
+  reason: r.reason ?? '',
+  totalAmount: num(r.total_amount),
+  refundAmount: num(r.refund_amount),
+  createdAt: r.created_at,
+  createdBy: r.created_by ?? undefined,
+  items: (r.purchase_return_items ?? []).map((i: any) => ({
+    purchaseLineId: i.purchase_line_id ?? undefined,
+    productId: i.product_id ?? undefined,
+    productName: i.product_name,
+    quantity: num(i.quantity),
+    unitPrice: num(i.unit_price),
+    amount: num(i.amount),
+    unit: i.unit ?? undefined,
+  })),
+});
+
 const toSale = (r: any): Sale => ({
   id: r.id,
   reference: r.reference,
+  invoiceNumber: r.invoice_number ?? undefined,
+  invoiceYear: r.invoice_year ?? undefined,
   clientId: r.client_id ?? null,
   date: r.date,
   bonNumber: r.bon_number ?? undefined,
@@ -838,6 +864,13 @@ export const db = {
     list: async (): Promise<Purchase[]> =>
       (await select<any>('purchases', '*, purchase_lines(*), purchase_payments(*)', 'date')).map(toPurchase),
     remove: (id: string) => remove('purchases', id),
+  },
+
+  // /purchase — retours d'achat
+  purchaseReturns: {
+    list: async (): Promise<PurchaseReturn[]> =>
+      (await selectOptional<any>('purchase_returns', '*, purchase_return_items(*)', 'date')).map(toPurchaseReturn),
+    remove: (id: string) => remove('purchase_returns', id),
   },
 
   // /pos & /sales
@@ -1350,6 +1383,10 @@ export const rpc = {
   /** Récupère la marchandise d'un bon : stock prêt, facture et argent du client. */
   createDeliveryRecovery: (payload: Record<string, any>) =>
     call<any>('create_delivery_recovery', { p_payload: payload }),
+
+  /** Retour d'achat : stock diminué, facture réduite, argent rendu en caisse. */
+  createPurchaseReturn: (payload: Record<string, any>) =>
+    call<any>('create_purchase_return', { p_payload: payload }),
 
   // /factures-non-comptabilisees — création (id null) ou modification
   saveFreeInvoice: (id: string | null, payload: Record<string, any>) =>

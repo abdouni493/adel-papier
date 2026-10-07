@@ -21,13 +21,14 @@ import { buildSupplierHistory, type HistoryPayment } from '@/lib/partyHistory';
 import { supplierAccountOf } from '@/lib/accounts';
 import { formatCurrency, formatDate, formatDateTime, paymentMethodLabel, todayISO } from '@/lib/utils';
 import { printInvoice } from '@/lib/print';
+import { printReturn } from '@/pages/Purchase/PurchaseReturnModal';
 import { printPaymentReceipt } from '@/lib/documents';
 import { printListDocument } from '@/lib/statementPrint';
 import { PrintTitleDialog, type PrintTitleRequest } from './PrintTitleDialog';
 import { VersementChecklist, type VersementItem } from './VersementChecklist';
 import { EntryEditor, type EntryRequest } from './entries/EntryEditor';
 import type {
-  Supplier, PartyOldDebt, PartyPayment, Purchase, PartyCreditRefund,
+  Supplier, PartyOldDebt, PartyPayment, Purchase, PartyCreditRefund, PurchaseReturn,
 } from '@/types';
 
 /* ============================================================================
@@ -80,6 +81,8 @@ export function SupplierHistoryScreen({
 
   const purchases = usePurchaseStore((s) => s.purchases);
   const deletePurchase = usePurchaseStore((s) => s.deletePurchase);
+  const purchaseReturns = usePurchaseStore((s) => s.returns);
+  const deleteReturn = usePurchaseStore((s) => s.deleteReturn);
 
   const [viewPurchase, setViewPurchase] = useState<Purchase | null>(null);
   const [editPayment, setEditPayment] = useState<PartyPayment | null>(null);
@@ -359,6 +362,34 @@ export function SupplierHistoryScreen({
   const directPayments = history.payments.filter((p) => p.source === 'direct');
   const directTotal = sum(directPayments.map((p) => p.amount));
 
+  // Retours d'achat : marchandise rendue au fournisseur
+  const myReturns = supplier
+    ? purchaseReturns.filter((r) => r.supplierId === supplier.id).sort((a, b) => b.date.localeCompare(a.date))
+    : [];
+  const refOfPurchase = (id: string) => purchases.find((p) => p.id === id)?.reference ?? '—';
+  const returnColumns: DataColumn<PurchaseReturn>[] = [
+    { key: 'date', label: 'Date', render: (r) => formatDate(r.date, language) },
+    { key: 'ref', label: 'Retour', render: (r) => <span className="font-semibold">{r.reference}</span> },
+    { key: 'purchase', label: 'Facture', render: (r) => refOfPurchase(r.purchaseId) },
+    { key: 'items', label: 'Marchandise', hideOnMobile: true,
+      render: (r) => r.items.map((i) => `${i.productName} × ${i.quantity}`).join(', ') },
+    { key: 'total', label: 'Valeur rendue', align: 'right', render: (r) => money(r.totalAmount) },
+    { key: 'refund', label: 'Argent récupéré', align: 'right',
+      render: (r) => <span className="font-bold text-pistachio">{money(r.refundAmount)}</span> },
+  ];
+  const returnActions = (r: PurchaseReturn): ActionItem[] => [
+    { label: 'Imprimer', icon: <Printer size={15} />,
+      onClick: () => printReturn(r, purchases.find((p) => p.id === r.purchaseId)) },
+    { label: 'Annuler le retour', icon: <Trash2 size={15} />, danger: true, hidden: !can('purchase', 'delete'),
+      onClick: () =>
+        ask(
+          'Annuler le retour',
+          "La marchandise revient dans le stock, la facture retrouve son montant et l'entrée de caisse est supprimée.",
+          async () => { await deleteReturn(r.id); toast.success('Retour annulé'); }
+        ),
+    },
+  ];
+
   const sections: HistorySection<never>[] = [
     {
       key: 'purchases', label: 'Achats', icon: <Package size={14} />,
@@ -391,6 +422,24 @@ export function SupplierHistoryScreen({
           formatCurrency(sum(list.map((p) => p.totalAmount)))
         );
       },
+    },
+    {
+      key: 'returns', label: "Retours d'achat", icon: <Undo2 size={14} />,
+      rows: myReturns as never[],
+      columns: returnColumns as DataColumn<never>[],
+      actions: returnActions as unknown as (row: never, i: number) => ActionItem[],
+      stats: [
+        { label: 'Retours', value: String(myReturns.length), icon: <Undo2 size={12} /> },
+        { label: 'Valeur rendue', value: money(sum(myReturns.map((r) => r.totalAmount))), tone: 'accent' },
+        { label: 'Argent récupéré', value: money(sum(myReturns.map((r) => r.refundAmount))), tone: 'pos' },
+      ],
+      dateOf: (r: never) => (r as unknown as PurchaseReturn).date,
+      searchOf: (r: never) => {
+        const x = r as unknown as PurchaseReturn;
+        return `${x.reference} ${refOfPurchase(x.purchaseId)} ${x.items.map((i) => i.productName).join(' ')}`;
+      },
+      empty: "Aucun retour d'achat pour ce fournisseur",
+      note: "Marchandise rendue au fournisseur : sortie du stock, déduite de la facture, argent payé en trop revenu en caisse.",
     },
     {
       key: 'payments', label: 'Versements', icon: <Coins size={14} />,

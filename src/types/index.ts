@@ -65,6 +65,8 @@ export interface Supplier {
 
 // ---------- Purchases ----------
 export interface PurchaseLine {
+  /** Identifiant de la ligne en base (retours d'achat). */
+  lineId?: string;
   productId: string;
   productName?: string;
   quantity: number;
@@ -120,6 +122,33 @@ export interface Purchase {
    */
   allocatedAmount?: number;
   payments: Payment[];
+  createdBy?: string;
+}
+
+/** Retour d'achat : marchandise rendue au fournisseur. */
+export interface PurchaseReturnItem {
+  purchaseLineId?: string;
+  productId?: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+  unit?: string;
+}
+
+export interface PurchaseReturn {
+  id: string;
+  reference: string;
+  purchaseId: string;
+  supplierId: string;
+  date: string;
+  reason: string;
+  /** Valeur de la marchandise rendue (déduite de la facture). */
+  totalAmount: number;
+  /** Argent rendu par le fournisseur — entré en caisse. */
+  refundAmount: number;
+  items: PurchaseReturnItem[];
+  createdAt: string;
   createdBy?: string;
 }
 
@@ -202,6 +231,9 @@ export type SaleStatus = 'paid' | 'debt';
 export interface Sale {
   id: string;
   reference: string;
+  /** N° imprimé « n/année » — repart à 1 chaque année. */
+  invoiceNumber?: number;
+  invoiceYear?: number;
   clientId: string | null;
   date: string;
   /** N° de bon de commande saisi manuellement (repère client, recherche). */
@@ -648,6 +680,8 @@ export interface CommandDelivery {
   id: string;
   commandId: string;
   reference: string;
+  /** N° imprimé du bon — repart à 1 chaque mois. */
+  blNumber?: number;
   date: string;
   deliveredAt: string;      // ISO datetime
   notes?: string;

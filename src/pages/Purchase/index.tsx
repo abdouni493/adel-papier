@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ShoppingCart, Plus, Eye, Wallet, Printer, Trash2, Calendar, Folder, DollarSign, TrendingDown, CheckCircle2, FileText, CarFront, History, PencilLine } from 'lucide-react';
+import { ShoppingCart, Plus, Eye, Wallet, Printer, Trash2, Calendar, Folder, DollarSign, TrendingDown, CheckCircle2, FileText, CarFront, History, PencilLine, Undo2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SearchBar } from '@/components/ui/SearchBar';
 import { Select } from '@/components/ui/Select';
@@ -14,6 +14,7 @@ import { ViewToggle } from '@/components/ui/ViewToggle';
 import { DataTable, useViewMode, type DataColumn } from '@/components/ui/DataTable';
 import type { ActionItem } from '@/components/ui/ActionMenu';
 import { CreatePurchase } from './CreatePurchase';
+import { PurchaseReturnModal, printReturn } from './PurchaseReturnModal';
 import { PayDebtModal } from '@/components/shared/PayDebtModal';
 import { usePurchaseStore } from '@/store/purchaseStore';
 import { useSupplierStore } from '@/store/supplierStore';
@@ -29,7 +30,9 @@ import type { Purchase } from '@/types';
 export default function PurchasePage() {
   const { t, language } = useLanguage();
   const { can } = usePermissions();
-  const { purchases, payDebt, deletePurchase } = usePurchaseStore();
+  const { purchases, returns, payDebt, deletePurchase } = usePurchaseStore();
+  /** Facture dont la marchandise est rendue au fournisseur. */
+  const [returning, setReturning] = useState<Purchase | null>(null);
   const suppliers = useSupplierStore((s) => s.suppliers);
   const settings = useSettingsStore((s) => s.settings);
   const stockProducts = useStockStore((s) => s.products);
@@ -147,6 +150,8 @@ export default function PurchasePage() {
       onClick: () => setEditing(p) },
     { label: 'Payer la dette', icon: <Wallet size={15} />,
       hidden: !can('purchase', 'pay') || p.restAmount <= 0, onClick: () => setPaying(p) },
+    { label: "Retour d'achat (récupérer)", icon: <Undo2 size={15} />,
+      hidden: !can('purchase', 'edit') || p.isHistorical, onClick: () => setReturning(p) },
     { label: t('print'), icon: <Printer size={15} />, onClick: () => handlePrint(p) },
     { label: t('delete'), icon: <Trash2 size={15} />, danger: true, hidden: !can('purchase', 'delete'),
       onClick: () => setDeleteId(p.id) },
@@ -344,6 +349,11 @@ export default function PurchasePage() {
                         <Wallet size={13} /> {t('pay')}
                       </Button>
                     )}
+                    {can('purchase', 'edit') && !p.isHistorical && (
+                      <Button size="sm" variant="secondary" className="px-2" onClick={() => setReturning(p)} title="Retour d'achat (récupérer)">
+                        <Undo2 size={13} className="text-gold-dark" />
+                      </Button>
+                    )}
                     <Button size="sm" variant="secondary" className="px-2" onClick={() => handlePrint(p)} title={t('print')}><Printer size={13} /></Button>
                     {can('purchase', 'delete') && (
                       <Button size="sm" variant="ghost" className="px-2 hover:bg-rose-deep/5" onClick={() => setDeleteId(p.id)} title={t('delete')}>
@@ -430,8 +440,31 @@ export default function PurchasePage() {
                 ))}
               </div>
             )}
+            {returns.some((r) => r.purchaseId === viewing.id) && (
+              <div>
+                <p className="text-sm font-semibold text-text-secondary mb-2">Retours d'achat</p>
+                {returns.filter((r) => r.purchaseId === viewing.id).map((r) => (
+                  <div key={r.id} className="flex items-center justify-between gap-2 text-sm py-1 border-b border-gold/10">
+                    <span className="text-text-muted">
+                      {formatDate(r.date, language)} — {r.reference} · {r.items.map((i) => `${i.productName} × ${i.quantity}`).join(', ')}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="tabular font-semibold">− {formatCurrency(r.totalAmount)}</span>
+                      <Button size="sm" variant="secondary" className="px-2" onClick={() => printReturn(r, viewing)} title={t('print')}>
+                        <Printer size={13} />
+                      </Button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => handlePrint(viewing)}><Printer size={16} /> {t('print')}</Button>
+              {can('purchase', 'edit') && !viewing.isHistorical && (
+                <Button variant="outline" onClick={() => { setReturning(viewing); setViewing(null); }}>
+                  <Undo2 size={16} /> Retour d'achat
+                </Button>
+              )}
               {can('purchase', 'edit') && (
                 <Button
                   variant="gold"
@@ -449,6 +482,8 @@ export default function PurchasePage() {
         <PayDebtModal open={!!paying} onClose={() => setPaying(null)} reference={paying.reference} partyName={supplierName(paying.supplierId)}
           total={paying.totalAmount} paid={paying.paidAmount} onPay={(amount, _desc, paidAt) => { void payDebt(paying.id, amount, (paidAt || new Date().toISOString()).slice(0, 10)); }} />
       )}
+
+      <PurchaseReturnModal purchase={returning} onClose={() => setReturning(null)} />
 
       <ConfirmDialog open={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={() => { if (deleteId) { void deletePurchase(deleteId).then(() => toast.success('Facture supprimée')); } }} />
     </div>

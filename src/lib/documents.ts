@@ -38,9 +38,9 @@ export interface ClientFiscal {
 }
 
 /** Lignes d'identification reprises sous le nom du destinataire. */
-function fiscalLines(c: ClientFiscal): string[] {
+function fiscalLines(c: ClientFiscal, withAddress = true): string[] {
   return [
-    c.address ? `ADRESSE : ${c.address}` : '',
+    withAddress && c.address ? `ADRESSE : ${c.address}` : '',
     c.rc ? `R.C N° : ${c.rc}` : '',
     c.nif ? `NIF : ${c.nif}` : '',
     c.nis ? `NIS : ${c.nis}` : '',
@@ -205,6 +205,8 @@ export interface DeliveryNoteLine {
 
 export interface DeliveryNoteData {
   reference: string;
+  /** N° du bon dans le mois (repart à 1 chaque mois). */
+  blNumber?: number;
   commandReference: string;
   /** N° de bon de commande saisi manuellement sur la commande. */
   bonNumber?: string;
@@ -286,7 +288,12 @@ export function printDeliveryNote(data: DeliveryNoteData, store: StoreSettings) 
       docDate: data.deliveredAt,
       endText: data.endText,
       doitName: data.clientName,
-      metaLines: [`N° BL : ${data.reference}`],
+      doitLines: fiscalLines({
+        name: data.clientName, phone: data.clientPhone, rc: data.clientRc,
+        nif: data.clientNif, nis: data.clientNis, article: data.clientArticle,
+      }, false),
+      metaLines: [`N° BL : ${data.blNumber ?? data.reference}`],
+      minimalHeader: true,
       tables: [
         {
           columns: [
@@ -299,7 +306,7 @@ export function printDeliveryNote(data: DeliveryNoteData, store: StoreSettings) 
           rows,
           totals: totalsBlock({
             ht, tvaEnabled: data.tvaEnabled, tvaRate: data.tvaRate, tvaAmount,
-            ttc, paid, rest, showPayment: true,
+            ttc, paid, rest, showPayment: false,
           }),
           emptyLabel: 'Aucune quantité livrée sur ce bon',
         },
@@ -367,7 +374,8 @@ export function printDeliveryPeriodReport(data: DeliveryPeriodReportData, store:
       title: 'BON DE LIVRAISON',
       docDate: data.to,
       doitName: data.client.name,
-      doitLines: fiscalLines(data.client),
+      doitLines: fiscalLines(data.client, false),
+      minimalHeader: true,
       metaLines: [`LIVRAISON DU ${formatDate(data.from)} AU ${formatDate(data.to)}`],
       tables: [
         {
@@ -384,12 +392,11 @@ export function printDeliveryPeriodReport(data: DeliveryPeriodReportData, store:
           rows,
           totals: totalsBlock({
             ht, tvaEnabled: data.applyTva, tvaRate: rate, tvaAmount: tva, ttc,
-            paid, rest, showPayment: true,
+            paid, rest, showPayment: false,
           }),
           emptyLabel: 'Aucune livraison sur la période',
         },
       ],
-      footNotes: (data.versements ?? []).map((v) => versementLine(v.amount, v.date)),
       signatures: ['Le client', 'Signature'],
       fileName: `Livraisons_${data.client.name.replace(/\s+/g, '_')}`,
     },
@@ -1097,8 +1104,6 @@ export function printFreeDeliveryNote(data: FreeDocumentData, store: StoreSettin
   } else {
     totals.push({ label: 'Total', value: formatCurrency(data.finalAmount), strong: true });
   }
-  totals.push({ label: 'Versement', value: formatCurrency(data.paidAmount) });
-  totals.push({ label: 'Reste à payer', value: formatCurrency(data.restAmount), strong: true });
 
   printOfficialDocument(
     {
@@ -1106,7 +1111,8 @@ export function printFreeDeliveryNote(data: FreeDocumentData, store: StoreSettin
       docDate: data.date,
       endText: data.endText,
       doitName: data.client.name,
-      doitLines: fiscalLines(data.client),
+      doitLines: fiscalLines(data.client, false),
+      minimalHeader: true,
       metaLines: [
         `N° BL : ${data.reference}`,
         data.driverName ? `CHAUFFEUR : ${data.driverName}${data.driverPlate ? ` · ${data.driverPlate}` : ''}` : '',
@@ -1136,6 +1142,69 @@ export function printFreeDeliveryNote(data: FreeDocumentData, store: StoreSettin
       observations: data.notes?.trim() ? data.notes.trim() : undefined,
       signatures: ['Le client', 'Signature'],
       fileName: `Bon_de_Livraison_${data.reference}`,
+    },
+    store
+  );
+}
+
+/* --------------------------------------------------------- retour d'achat */
+
+export interface PurchaseReturnPrintData {
+  reference: string;
+  purchaseReference: string;
+  date: string;
+  supplierName: string;
+  supplierPhone?: string;
+  reason?: string;
+  lines: { productName: string; quantity: number; unit?: string; unitPrice: number }[];
+  totalAmount: number;
+  refundAmount: number;
+}
+
+/**
+ * BON DE RETOUR D'ACHAT — marchandise rendue au fournisseur : quantités,
+ * valeur déduite de la facture d'achat et argent récupéré.
+ */
+export function printPurchaseReturn(data: PurchaseReturnPrintData, store: StoreSettings) {
+  const totals: DocTotal[] = [
+    { label: 'Total retourné', value: formatCurrency(data.totalAmount), strong: true },
+    { label: 'Argent récupéré', value: formatCurrency(data.refundAmount) },
+  ];
+  const deducted = Math.max(0, data.totalAmount - data.refundAmount);
+  if (deducted > 0.004) totals.push({ label: 'Déduit de la dette', value: formatCurrency(deducted) });
+
+  printOfficialDocument(
+    {
+      title: "BON DE RETOUR D'ACHAT",
+      docDate: data.date,
+      doitLabel: 'FOURNISSEUR',
+      doitName: data.supplierName,
+      doitLines: [data.supplierPhone ? `TEL : ${data.supplierPhone}` : ''].filter(Boolean),
+      metaLines: [`N° RETOUR : ${data.reference}`, `FACTURE D'ACHAT : ${data.purchaseReference}`],
+      tables: [
+        {
+          columns: [
+            { label: 'Désignation', align: 'left' },
+            { label: 'Quantité', align: 'center', width: '15%' },
+            { label: 'Prix U', align: 'right', width: '18%' },
+            { label: 'Montant', align: 'right', width: '20%' },
+          ],
+          rows: data.lines.map((l) => ({
+            cells: [
+              esc(l.productName.toUpperCase()),
+              `${qty(l.quantity)}${l.unit ? ` ${esc(l.unit)}` : ''}`,
+              formatCurrency(l.unitPrice),
+              formatCurrency(l.quantity * l.unitPrice),
+            ],
+          })),
+          totals,
+          emptyLabel: 'Aucune marchandise rendue',
+        },
+      ],
+      amountInWords: amountInWords(data.totalAmount),
+      observations: data.reason?.trim() || undefined,
+      signatures: ['Le fournisseur', 'Signature'],
+      fileName: `Retour_Achat_${data.reference}`,
     },
     store
   );

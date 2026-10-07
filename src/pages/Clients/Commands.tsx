@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { NewClientModal } from '@/components/shared/NewClientModal';
 import {
   ShoppingCart, Plus, Search, Calendar, Clock, Eye, Pencil, Trash2, CheckCircle2,
   AlertTriangle, Printer, UserPlus, X, Coins, User, Phone, Receipt, Truck,
@@ -54,7 +55,7 @@ export default function CommandsPage() {
     addDelivery, updateDelivery, deleteDelivery,
     cancelRemainder, increaseCommand: increaseCommandLines,
   } = useCommandStore();
-  const { clients, addClient, updateClient, applyCreditToCommand, applyCreditToSale } = useClientStore();
+  const { clients, updateClient, getOrCreatePassager, applyCreditToCommand, applyCreditToSale } = useClientStore();
   const sales = useSalesStore((s) => s.sales);
   const { ficheTechnics } = useFicheTechnicStore();
   const settings = useSettingsStore((s) => s.settings);
@@ -78,9 +79,6 @@ export default function CommandsPage() {
   const [selectedClient, setSelectedClient] =
     useState<{ id: string; name: string; phone?: string; address?: string } | null>(null);
   const [showNewClientForm, setShowNewClientForm] = useState(false);
-  const [newClientName, setNewClientName] = useState('');
-  const [newClientPhone, setNewClientPhone] = useState('');
-  const [newClientAddress, setNewClientAddress] = useState('');
   /** Adresse de livraison — redemandée à CHAQUE commande. */
   const [clientAddress, setClientAddress] = useState('');
   const [addressError, setAddressError] = useState(false);
@@ -234,22 +232,6 @@ export default function CommandsPage() {
   );
 
   /* ---------------------------------------------------------------- form */
-  const handleCreateClientInline = async () => {
-    if (!newClientName.trim()) { toast.error('Nom du client requis'); return; }
-    if (!newClientAddress.trim()) { toast.error('Adresse du client requise'); return; }
-    const newCli = await addClient({
-      name: newClientName.trim(),
-      phone: newClientPhone.trim(),
-      address: newClientAddress.trim(),
-    });
-    setSelectedClient(newCli);
-    setClientAddress(newCli.address || newClientAddress.trim());
-    setAddressError(false);
-    setNewClientName(''); setNewClientPhone(''); setNewClientAddress('');
-    setShowNewClientForm(false);
-    toast.success('Client créé et sélectionné');
-  };
-
   /** Sélection d'un client : son adresse connue est proposée, jamais imposée. */
   const handleSelectClient = (cli: { id: string; name: string; phone?: string; address?: string }) => {
     setSelectedClient(cli);
@@ -337,7 +319,6 @@ export default function CommandsPage() {
     // l'adresse et le chauffeur sont redemandés à chaque nouvelle commande
     setClientAddress(''); setAddressError(false);
     setDriverName(''); setDriverPlate('');
-    setNewClientName(''); setNewClientPhone(''); setNewClientAddress('');
     setShowNewClientForm(false); setFormOpen(true);
   };
 
@@ -371,7 +352,8 @@ export default function CommandsPage() {
 
   const handleSaveCommand = async () => {
     if (!selectedClient) { toast.error('Veuillez sélectionner un client'); return; }
-    if (!clientAddress.trim()) {
+    const passager = selectedClient.name.toLowerCase().startsWith('client passager');
+    if (!passager && !clientAddress.trim()) {
       setAddressError(true);
       toast.error("L'adresse de livraison du client est obligatoire");
       return;
@@ -391,7 +373,7 @@ export default function CommandsPage() {
 
       const address = clientAddress.trim();
       // l'adresse saisie devient l'adresse de référence du client
-      if (address && address !== (clients.find((c) => c.id === selectedClient.id)?.address || '')) {
+      if (!passager && address && address !== (clients.find((c) => c.id === selectedClient.id)?.address || '')) {
         await updateClient(selectedClient.id, { address });
       }
 
@@ -521,6 +503,7 @@ export default function CommandsPage() {
         docTitle,
         endText,
         reference: delivery.reference,
+        blNumber: delivery.blNumber,
         commandReference: cmd.reference,
         bonNumber: cmd.bonNumber,
         clientName: cmd.clientName,
@@ -1278,34 +1261,19 @@ export default function CommandsPage() {
                       className="pl-10"
                     />
                   </div>
-                  <Button variant="secondary" onClick={() => setShowNewClientForm(!showNewClientForm)}>
+                  <Button variant="secondary" onClick={() => setShowNewClientForm(true)}>
                     <UserPlus size={16} /> Client
                   </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={async () => {
+                      try { handleSelectClient(await getOrCreatePassager()); } catch { /* message déjà affiché */ }
+                    }}
+                  >
+                    <User size={16} /> Passager
+                  </Button>
                 </div>
-                <AnimatePresence>
-                  {showNewClientForm && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="p-3 border border-gold/30 rounded-xl bg-vanilla/80 space-y-3"
-                    >
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <Input placeholder="Nom du client *" value={newClientName} onChange={(e) => setNewClientName(e.target.value)} />
-                        <Input placeholder="Téléphone" value={newClientPhone} onChange={(e) => setNewClientPhone(e.target.value)} />
-                      </div>
-                      <Input
-                        placeholder="Adresse du client *"
-                        value={newClientAddress}
-                        onChange={(e) => setNewClientAddress(e.target.value)}
-                      />
-                      <div className="flex justify-end gap-2">
-                        <Button size="sm" variant="secondary" onClick={() => setShowNewClientForm(false)}>Annuler</Button>
-                        <Button size="sm" variant="gold" onClick={handleCreateClientInline}>Créer &amp; sélectionner</Button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+
                 {clientSearch && clientSearchResults.length > 0 && (
                   <div className="border border-gold/30 rounded-xl bg-[--surface-dropdown] max-h-[160px] overflow-y-auto shadow-xl">
                     {clientSearchResults.map((cli) => (
@@ -1979,6 +1947,11 @@ export default function CommandsPage() {
       </Modal>
 
       <PrintTitleDialog request={titleRequest} onClose={() => setTitleRequest(null)} />
+      <NewClientModal
+        open={showNewClientForm}
+        onClose={() => setShowNewClientForm(false)}
+        onCreated={(c) => handleSelectClient(c)}
+      />
     </div>
   );
 }

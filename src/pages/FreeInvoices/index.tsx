@@ -92,6 +92,7 @@ export default function FreeInvoicesPage() {
       return;
     }
     printSaleInvoice({
+      hidePayment: true,
       docTitle: title,
       endText,
       observations: inv.notes || undefined,

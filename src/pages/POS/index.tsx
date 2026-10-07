@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
-import { ClientForm } from '@/components/shared/ClientForm';
+import { NewClientModal } from '@/components/shared/NewClientModal';
 import { VirtualKeyboard } from '@/components/shared/VirtualKeyboard';
 import { useComptoirStore } from '@/store/comptoirStore';
 import { useClientStore } from '@/store/clientStore';
@@ -662,6 +662,8 @@ export default function POS() {
     printSaleInvoice(
       {
         reference: sale.reference,
+        invoiceNumber: sale.invoiceNumber,
+        invoiceYear: sale.invoiceYear,
         date: sale.date,
         client: {
           name: client?.name || t('walkIn'),
@@ -1546,18 +1548,11 @@ export default function POS() {
         )}
       </Modal>
 
-      <Modal open={showClientForm} onClose={() => setShowClientForm(false)} title="Nouveau client" size="sm">
-        <ClientForm
-          requireAddress={posMode === 'command'}
-          onSubmit={async (data) => {
-            const c = await addClient(data);
-            selectClient(c);
-            setShowClientForm(false);
-            toast.success('Client créé');
-          }}
-          onCancel={() => setShowClientForm(false)}
-        />
-      </Modal>
+      <NewClientModal
+        open={showClientForm}
+        onClose={() => setShowClientForm(false)}
+        onCreated={(c) => selectClient(c)}
+      />
 
       {/* ---- Print prompt after a command created at the till ---- */}
       <Modal open={!!commandPrompt} onClose={() => setCommandPrompt(null)} size="sm">

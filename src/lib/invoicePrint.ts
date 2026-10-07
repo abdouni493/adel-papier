@@ -50,7 +50,12 @@ export interface InvoiceLine {
 }
 
 export interface SaleInvoiceData {
+  /** Facture non comptabilisée : ni versement, ni reste à payer, ni adresse. */
+  hidePayment?: boolean;
   reference: string;
+  /** N° annuel imprimé : « FACTURE 1/2026 ». */
+  invoiceNumber?: number;
+  invoiceYear?: number;
   date: string; // ISO
   client: {
     name: string;
@@ -169,6 +174,10 @@ export function amountInWords(amount: number): string {
  * une seconde section, avec leurs matières consommées.
  */
 export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
+  // numérotation annuelle : 1/2026, 2/2026 … puis 1/2027
+  const numbered = data.invoiceNumber
+    ? `${data.invoiceNumber}/${data.invoiceYear ?? new Date(data.date).getFullYear()}`
+    : '';
   const baseHT = Math.max(0, (data.total || 0) - (data.reduction || 0));
   const tvaRate = data.tvaEnabled ? (data.tvaRate ?? 0) : 0;
   const tvaAmount = data.tvaEnabled
@@ -186,8 +195,10 @@ export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
   } else {
     totals.push({ label: 'Net à payer', value: formatCurrency(data.final), strong: true });
   }
-  totals.push({ label: 'Versement', value: formatCurrency(data.paid) });
-  totals.push({ label: 'Reste à payer', value: formatCurrency(data.rest), strong: true });
+  if (!data.hidePayment) {
+    totals.push({ label: 'Versement', value: formatCurrency(data.paid) });
+    totals.push({ label: 'Reste à payer', value: formatCurrency(data.rest), strong: true });
+  }
 
   // Colonne « ADRESSE DE LIVRAISON » du modèle papier.
   const address = (data.client.address || '').trim();
@@ -253,13 +264,14 @@ export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
 
   printOfficialDocument(
     {
-      title: (data.docTitle?.trim() || (data.tvaEnabled ? 'FACTURE DE VENTE (T.T.C)' : 'FACTURE DE VENTE')).toUpperCase(),
+      title: (data.docTitle?.trim()
+        || (numbered ? `FACTURE ${numbered}` : data.tvaEnabled ? 'FACTURE DE VENTE (T.T.C)' : 'FACTURE DE VENTE')).toUpperCase(),
       endText: data.endText,
       observations: data.observations,
       docDate: data.date,
       doitName: data.client.name,
       doitLines: [
-        data.client.address ? `ADRESSE : ${data.client.address}` : '',
+        !data.hidePayment && data.client.address ? `ADRESSE : ${data.client.address}` : '',
         data.client.rc ? `R.C N° : ${data.client.rc}` : '',
         data.client.nif ? `NIF : ${data.client.nif}` : '',
         data.client.nis ? `NIS : ${data.client.nis}` : '',
@@ -267,7 +279,7 @@ export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
         data.client.phone ? `TEL : ${data.client.phone}` : '',
       ].filter(Boolean),
       metaLines: [
-        `N° FACTURE : ${data.reference}`,
+        `N° FACTURE : ${numbered || data.reference}`,
         `DATE : ${formatDateTime(data.date)}`,
         data.deliveryReference ? `BON DE LIVRAISON : ${data.deliveryReference}` : '',
         data.commandReference ? `COMMANDE : ${data.commandReference}` : '',
@@ -276,7 +288,7 @@ export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
       ].filter(Boolean),
       tables,
       amountInWords: amountInWords(data.final),
-      stamps: [
+      stamps: data.hidePayment ? [] : [
         data.rest > 0
           ? { label: 'Vente à crédit', tone: 'warn' as const }
           : { label: 'Réglée intégralement', tone: 'ok' as const },
@@ -284,7 +296,7 @@ export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
         ...(data.historical ? [{ label: 'Vente antérieure — saisie rétroactive', tone: 'warn' as const }] : []),
         ...(data.deliveryReference ? [{ label: 'Issue d’un bon de livraison', tone: 'ok' as const }] : []),
       ],
-      footNotes: [
+      footNotes: data.hidePayment ? [] : [
         data.paid > 0 ? versementLine(data.paid, data.date) : '',
         data.rest > 0 ? `RESTE À PAYER : ${formatCurrency(data.rest)}` : '',
       ].filter(Boolean),

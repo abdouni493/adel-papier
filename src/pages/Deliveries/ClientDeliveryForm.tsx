@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, CalendarClock, Factory, Hash, MapPin, Package, PackageCheck, Percent, PiggyBank,
-  Receipt, Search, Truck, User, UserRound, Wallet, X,
+  Receipt, Search, Truck, User, UserPlus, UserRound, Wallet, X,
 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -22,6 +22,7 @@ import { commandAdvanceAvailable, deliveryPaymentSplit } from '@/lib/commandBill
 import { stockRequirementsForDelivery } from '@/lib/ficheStock';
 import { formatCurrency, formatNumber, DEFAULT_TVA_RATE } from '@/lib/utils';
 import type { Client, CommandDelivery } from '@/types';
+import { NewClientModal } from '@/components/shared/NewClientModal';
 
 interface Props {
   open: boolean;
@@ -37,7 +38,11 @@ interface Line {
   ficheId: string;
   productName: string;
   quantity: number;
+  /** Prix unitaire de la partie livrée hors commande (vente directe). */
+  unitPrice: number;
 }
+
+const isPassager = (c: Client) => c.name.toLowerCase().startsWith('client passager');
 
 const r3 = (n: number) => Math.round((n || 0) * 1000) / 1000;
 const q = (n: number) => formatNumber(r3(n));
@@ -78,6 +83,8 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
   const productions = useProductionStore((s) => s.productions);
   const products = useStockStore((s) => s.products);
   const sales = useSalesStore((s) => s.sales);
+  const getOrCreatePassager = useClientStore((s) => s.getOrCreatePassager);
+  const [newClientOpen, setNewClientOpen] = useState(false);
 
   const [client, setClient] = useState<Client | null>(null);
   const [clientSearch, setClientSearch] = useState('');
@@ -117,7 +124,7 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
         if (!fiche) return;
         const cur = grouped.get(fiche.id);
         if (cur) cur.quantity = r3(cur.quantity + it.quantity);
-        else grouped.set(fiche.id, { key: fiche.id, ficheId: fiche.id, productName: fiche.name, quantity: it.quantity });
+        else grouped.set(fiche.id, { key: fiche.id, ficheId: fiche.id, productName: fiche.name, quantity: it.quantity, unitPrice: fiche.unitPrice });
       });
       setLines([...grouped.values()]);
       setDeliveredAt(toLocal(editing.deliveredAt));
@@ -170,7 +177,11 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
   }, [editing]);
 
   const openLines = useMemo(
-    () => (client ? openLinesOfClient(client.id, commands, fiches, editing ? editExtra : undefined) : []),
+    // client passager : chaque livraison est une vente directe — les commandes
+    // ouvertes d'autres passagers ne sont jamais servies
+    () => (client && (editing || !isPassager(client))
+      ? openLinesOfClient(client.id, commands, fiches, editing ? editExtra : undefined)
+      : []),
     [client, commands, fiches, editing, editExtra]
   );
 
@@ -215,8 +226,14 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
       return;
     }
     const remaining = remainingByFiche.get(ficheId) ?? 0;
-    setLines((ls) => [...ls, { key: `${ficheId}-${Date.now()}`, ficheId, productName: f.name, quantity: remaining }]);
+    setLines((ls) => [...ls, {
+      key: `${ficheId}-${Date.now()}`, ficheId, productName: f.name,
+      quantity: remaining > 0.0005 ? remaining : 1, unitPrice: f.unitPrice || 0,
+    }]);
   };
+
+  const setPrice = (key: string, value: number) =>
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, unitPrice: Math.max(0, value) } : l)));
 
   const setQty = (key: string, value: number) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, quantity: Math.max(0, value) } : l)));
@@ -242,8 +259,11 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
     const fiche = fiches.find((f) => f.id === l.ficheId);
     const remaining = remainingByFiche.get(l.ficheId) ?? 0;
     const ready = Math.max(0, readyMap.get(l.ficheId) ?? 0);
-    const alloc = allocateQuantity(openLines, l.ficheId, l.quantity, preferEdit);
-    const value = alloc.parts.reduce((s, p) => s + p.take * p.unitPrice, 0);
+    // hors modification, ce qui dépasse le reste commandé est une VENTE DIRECTE :
+    // une commande est créée pour cette partie, au prix saisi
+    const direct = editing ? 0 : r3(Math.max(0, l.quantity - remaining));
+    const alloc = allocateQuantity(openLines, l.ficheId, r3(l.quantity - direct), preferEdit);
+    const value = alloc.parts.reduce((s, p) => s + p.take * p.unitPrice, 0) + direct * l.unitPrice;
     const fromReady = Math.min(l.quantity, ready);
     const toProduce = r3(Math.max(0, l.quantity - ready));
     // en modification : un produit déjà récupéré ne peut pas descendre plus bas
@@ -253,7 +273,7 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
           .reduce((s, it) => s + recoveredOnLine(recoveries, editing.id, it.commandItemId), 0)
       : 0;
     const unit = fiche?.sellByUnit ? fiche.sellUnit : undefined;
-    return { ...l, fiche, unit, remaining, ready, alloc, value, fromReady, toProduce, minQty };
+    return { ...l, fiche, unit, remaining, ready, alloc, direct, value, fromReady, toProduce, minQty };
   }), [lines, fiches, remainingByFiche, readyMap, openLines, preferEdit, editing, recoveries, editingCommand]);
 
   /** Commandes servies, dans l'ordre où la base créera les bons. */
@@ -290,6 +310,10 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
       ht += htC; tva += tvaC; advAvailable += availC;
       if (useAdvance) adv += Math.min(availC, ttcC);
     });
+    // vente directe (hors commande) : nouvelle commande, sans acompte
+    const htD = Math.round(rows.reduce((s, r) => s + r.direct * r.unitPrice, 0) * 100) / 100;
+    ht += htD;
+    tva += rate ? Math.round(htD * rate) / 100 : 0;
     const gross = ht + tva;
     const sale = editing ? sales.find((s) => s.id === editing.saleId) : undefined;
     // en modification, ce que le compte du client payait sur ce bon lui revient d'abord
@@ -312,7 +336,7 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
       ht, tva, ttc, adv, advAvailable, credit, maxCredit, creditUsed, maxCash, cash, paid,
       rest: Math.max(0, ttc - paid),
     };
-  }, [touched, tvaEnabled, tvaRate, deliveries, useAdvance, editing, sales, client, creditApplied, cashPaid, recoveries]);
+  }, [touched, rows, tvaEnabled, tvaRate, deliveries, useAdvance, editing, sales, client, creditApplied, cashPaid, recoveries]);
 
   /** Matières à déduire pour la partie produite automatiquement. */
   const requirements = useMemo(() => {
@@ -330,12 +354,12 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
     if (!client) { toast.error('Sélectionnez un client'); return; }
     const active = rows.filter((r) => r.quantity > 0);
     if (active.length === 0) { toast.error('Saisissez au moins une quantité à livrer'); return; }
-    const noOrder = active.find((r) => r.remaining <= 0.0005);
+    const noOrder = editing && active.find((r) => r.remaining <= 0.0005);
     if (noOrder) {
       toast.error(`« ${noOrder.productName} » : ce client n'a aucune commande en attente pour ce produit`);
       return;
     }
-    const over = active.find((r) => r.alloc.missing > 0.0005);
+    const over = editing && active.find((r) => r.alloc.missing > 0.0005);
     if (over) {
       toast.error(`« ${over.productName} » : la quantité dépasse le reste commandé par ce client (${q(over.remaining)})`);
       return;
@@ -361,7 +385,11 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
       cashPaid: money.cash,
       useAdvance,
       creditUsed: money.creditUsed,
-      lines: active.map((r) => ({ ficheTechnicId: r.ficheId, productName: r.productName, quantity: r3(r.quantity) })),
+      lines: active.map((r) => ({ ficheTechnicId: r.ficheId, productName: r.productName, quantity: r3(r.quantity - r.direct) })),
+      directLines: active.filter((r) => r.direct > 0.0005).map((r) => ({
+        ficheTechnicId: r.ficheId, productName: r.productName, quantity: r.direct, unitPrice: r.unitPrice,
+        sellByUnit: !!r.fiche?.sellByUnit, sellUnit: r.fiche?.sellByUnit ? r.fiche.sellUnit : undefined,
+      })),
     };
     setSaving(true);
     try {
@@ -429,13 +457,32 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
             </div>
           ) : (
             <div className="relative">
-              <Input
-                autoFocus
-                value={clientSearch}
-                onChange={(e) => setClientSearch(e.target.value)}
-                placeholder="Rechercher le client par nom ou numéro de téléphone…"
-                icon={<Search size={16} />}
-              />
+              <div className="flex flex-wrap gap-2">
+                <div className="min-w-[220px] flex-1">
+                  <Input
+                    autoFocus
+                    value={clientSearch}
+                    onChange={(e) => setClientSearch(e.target.value)}
+                    placeholder="Rechercher le client par nom ou numéro de téléphone…"
+                    icon={<Search size={16} />}
+                  />
+                </div>
+                <Button variant="secondary" className="h-11" onClick={() => setNewClientOpen(true)}>
+                  <UserPlus size={16} /> Nouveau client
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="h-11"
+                  onClick={async () => {
+                    try {
+                      const p = await getOrCreatePassager();
+                      setClient(p); setClientSearch(''); setLines([]); setTvaTouched(false);
+                    } catch { /* message déjà affiché */ }
+                  }}
+                >
+                  <User size={16} /> Client passager
+                </Button>
+              </div>
               {clientResults.length > 0 && (
                 <div className="mt-1 w-full max-h-72 overflow-y-auto rounded-xl border border-gold/20 bg-[--surface-dropdown] shadow-lg">
                   {clientResults.map((c) => {
@@ -485,7 +532,6 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
                       <button
                         key={fiche.id}
                         type="button"
-                        disabled={remaining <= 0.0005}
                         onClick={() => addProduct(fiche.id)}
                         className="flex w-full items-center justify-between gap-3 border-b border-gold/5 px-4 py-2.5 text-left text-sm last:border-0 hover:bg-gold/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -498,7 +544,7 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
                         <span className="shrink-0 text-right text-[11px] leading-tight">
                           {remaining > 0.0005
                             ? <span className="block font-bold text-gold-dark">Reste commandé : {q(remaining)}{u}</span>
-                            : <span className="block text-text-muted">Aucune commande en attente</span>}
+                            : <span className="block text-text-muted">Vente directe (hors commande)</span>}
                           <span className="block text-pistachio">Stock prêt : {q(ready)}{u}</span>
                         </span>
                       </button>
@@ -526,9 +572,10 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
                           <div className="min-w-0">
                             <p className="font-bold text-text-primary truncate">{r.productName}</p>
                             <p className="text-[11px] text-text-muted">
-                              {r.alloc.parts.length > 0
-                                ? r.alloc.parts.map((p) => `${p.commandReference} : ${q(p.take)}${u} × ${formatCurrency(p.unitPrice)}`).join(' · ')
-                                : 'Aucune commande servie'}
+                              {[
+                                ...r.alloc.parts.map((p) => `${p.commandReference} : ${q(p.take)}${u} × ${formatCurrency(p.unitPrice)}`),
+                                ...(r.direct > 0.0005 ? [`Vente directe : ${q(r.direct)}${u} × ${formatCurrency(r.unitPrice)}`] : []),
+                              ].join(' · ') || 'Aucune commande servie'}
                             </p>
                           </div>
                         </div>
@@ -567,6 +614,19 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
                         <Info label="Valeur H.T" value={formatCurrency(r.value)} tone="text-gold-dark" />
                       </div>
 
+                      {r.direct > 0.0005 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-gold/25 bg-gold/5 px-2.5 py-2 text-xs font-semibold text-gold-dark">
+                          <span>
+                            {q(r.direct)}{u} hors commande : une commande sera créée automatiquement pour cette quantité. Prix unitaire :
+                          </span>
+                          <input
+                            type="number" step="any" min={0}
+                            value={r.unitPrice}
+                            onChange={(e) => setPrice(r.key, Number(e.target.value))}
+                            className="h-8 w-32 rounded-lg border-2 border-[--border-input] bg-[--surface-input] px-2 text-right text-sm font-bold tabular text-text-primary focus:border-gold focus:outline-none"
+                          />
+                        </div>
+                      )}
                       {r.alloc.missing > 0.0005 && (
                         <p className="mt-2 flex items-start gap-1.5 text-xs font-semibold text-rose-deep">
                           <AlertTriangle size={13} className="mt-0.5 shrink-0" />
@@ -795,6 +855,11 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
           </p>
         )}
       </div>
+      <NewClientModal
+        open={newClientOpen}
+        onClose={() => setNewClientOpen(false)}
+        onCreated={(c) => { setClient(c); setClientSearch(''); setLines([]); setTvaTouched(false); }}
+      />
     </Modal>
   );
 }
