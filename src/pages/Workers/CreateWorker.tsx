@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, ShieldCheck, User, Wallet, KeyRound, Eye, EyeOff, RefreshCw } from 'lucide-react';
+import { Plus, ShieldCheck, User, Wallet, KeyRound, Eye, EyeOff, RefreshCw, Fingerprint } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
@@ -31,7 +31,7 @@ function randomPassword(): string {
 }
 
 export function CreateWorker({ initial, onClose }: CreateWorkerProps) {
-  const { roles, addRole, addWorker, updateWorker } = useWorkerStore();
+  const { roles, workers, addRole, addWorker, updateWorker } = useWorkerStore();
 
   const [form, setForm] = useState({
     fullName: initial?.fullName || '',
@@ -47,6 +47,9 @@ export function CreateWorker({ initial, onClose }: CreateWorkerProps) {
     email: initial?.email || '',
     username: initial?.username || '',
     password: '',
+    badgePin: initial?.badgePin || '',
+    workStart: initial?.workStart || '',
+    workEnd: initial?.workEnd || '',
   });
   const [roleModal, setRoleModal] = useState(false);
   const [roleName, setRoleName] = useState('');
@@ -69,6 +72,10 @@ export function CreateWorker({ initial, onClose }: CreateWorkerProps) {
     if (!form.fullName.trim()) errs.fullName = 'Nom requis';
     if (!form.phone.trim()) errs.phone = 'Téléphone requis';
     if (!form.roleId) errs.roleId = 'Rôle requis';
+    const pin = form.badgePin.trim();
+    if (pin && workers.some((w) => w.id !== initial?.id && w.badgePin === pin)) {
+      errs.badgePin = `N° déjà utilisé par ${workers.find((w) => w.id !== initial?.id && w.badgePin === pin)?.fullName}`;
+    }
 
     if (form.hasAccount) {
       const email = form.email.trim();
@@ -105,6 +112,10 @@ export function CreateWorker({ initial, onClose }: CreateWorkerProps) {
         email: form.hasAccount ? form.email.trim().toLowerCase() : '',
         username: form.hasAccount ? form.username.trim().toLowerCase() : '',
         password: form.hasAccount && form.password ? form.password : undefined,
+        // pointeuse : envoyés seulement si renseignés (la base peut ne pas avoir encore les colonnes)
+        ...(form.badgePin || initial?.badgePin ? { badgePin: form.badgePin.trim() } : {}),
+        ...(form.workStart || initial?.workStart ? { workStart: form.workStart } : {}),
+        ...(form.workEnd || initial?.workEnd ? { workEnd: form.workEnd } : {}),
       };
 
       if (initial) {
@@ -194,6 +205,27 @@ export function CreateWorker({ initial, onClose }: CreateWorkerProps) {
             />
           </div>
         )}
+      </section>
+
+      {/* Pointeuse */}
+      <section className="bg-vanilla/30 rounded-2xl p-4 border border-gold/15 space-y-3">
+        <h3 className="font-display font-semibold text-text-primary text-sm flex items-center gap-2">
+          <Fingerprint size={16} className="text-gold" /> Pointeuse (empreinte)
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Input
+            label="N° pointeuse (ID utilisateur)" inputMode="numeric"
+            value={form.badgePin}
+            onChange={(e) => set('badgePin', e.target.value.replace(/\D/g, '').slice(0, 9))}
+            placeholder="Ex : 1"
+            error={errors.badgePin}
+          />
+          <Input label="Début de travail" type="time" value={form.workStart} onChange={(e) => set('workStart', e.target.value)} />
+          <Input label="Fin de travail" type="time" value={form.workEnd} onChange={(e) => set('workEnd', e.target.value)} />
+        </div>
+        <p className="text-[11px] text-text-muted">
+          Le N° doit être le même que l'ID de l'employé sur la pointeuse. Horaires vides = horaires de l'usine (écran Pointage).
+        </p>
       </section>
 
       {/* 3 — Login account */}

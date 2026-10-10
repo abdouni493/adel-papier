@@ -30,6 +30,7 @@ const Deliveries    = lazy(() => import('@/pages/Deliveries'));
 const FreeInvoices  = lazy(() => import('@/pages/FreeInvoices'));
 const Suppliers     = lazy(() => import('@/pages/Suppliers'));
 const Workers       = lazy(() => import('@/pages/Workers'));
+const Attendance    = lazy(() => import('@/pages/Attendance'));
 const Expenses      = lazy(() => import('@/pages/Expenses'));
 const Caisse        = lazy(() => import('@/pages/Caisse'));
 const CaisseReports = lazy(() => import('@/pages/Caisse/CaisseReports'));
@@ -201,6 +202,7 @@ export default function App() {
           <Route path="/factures-non-comptabilisees" element={<Guarded module="sales"><FreeInvoices /></Guarded>} />
           <Route path="/suppliers" element={<Guarded module="suppliers"><Suppliers /></Guarded>} />
           <Route path="/workers" element={<Guarded module="workers"><Workers /></Guarded>} />
+          <Route path="/pointage" element={<Guarded module="workers"><Attendance /></Guarded>} />
           <Route path="/expenses" element={<Guarded module="expenses"><Expenses /></Guarded>} />
           {/* Les dettes clients sont désormais intégrées à l'interface Clients */}
           <Route path="/expenses/debts" element={<Navigate to="/clients" replace />} />

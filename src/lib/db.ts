@@ -248,6 +248,9 @@ const toWorker = (r: any): Worker => ({
     description: a.description ?? '', kind: a.kind ?? 'salary',
   })),
   overtimes: (r.worker_overtimes ?? []).map(toOvertime),
+  badgePin: r.badge_pin ?? '',
+  workStart: r.work_start ? String(r.work_start).slice(0, 5) : '',
+  workEnd: r.work_end ? String(r.work_end).slice(0, 5) : '',
 });
 
 const toOvertime = (r: any): WorkerOvertime => ({
@@ -445,6 +448,10 @@ const fromWorker = (w: Partial<Worker>) => ({
   email: w.email || null,
   username: w.username || null,
   permissions: w.permissions ?? {},
+  // colonnes de la pointeuse (supabase/parts/10_pointeuse.sql) : envoyées seulement si renseignées
+  ...(w.badgePin !== undefined ? { badge_pin: w.badgePin.trim() || null } : {}),
+  ...(w.workStart !== undefined ? { work_start: w.workStart || null } : {}),
+  ...(w.workEnd !== undefined ? { work_end: w.workEnd || null } : {}),
 });
 
 const toPurchase = (r: any): Purchase => ({

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   HardHat, Plus, Eye, Pencil, Shield, Wallet, CalendarX, Banknote, Trash2,
   Phone, Calendar, Clock, History, KeyRound, AlertTriangle, Users, Coins,
-  FileBarChart,
+  FileBarChart, Fingerprint,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SearchBar } from '@/components/ui/SearchBar';
@@ -25,6 +25,7 @@ import { WorkerAbsence } from './WorkerAbsence';
 import { WorkerPayment } from './WorkerPayment';
 import { WorkerOvertime } from './WorkerOvertime';
 import { WorkerHistory, type WorkerHistoryTab } from './WorkerHistory';
+import { WorkerAttendance } from './WorkerAttendance';
 import { useWorkerStore } from '@/store/workerStore';
 import { useLanguage } from '@/hooks/useLanguage';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -34,7 +35,7 @@ import type { Worker } from '@/types';
 
 type ModalType =
   | 'create' | 'edit' | 'permissions' | 'acompte' | 'absence'
-  | 'payment' | 'overtime' | 'history' | 'view' | null;
+  | 'payment' | 'overtime' | 'history' | 'view' | 'attendance' | null;
 
 type WorkerFilter = 'all' | 'account' | 'noAccount' | 'unpaidOvertime';
 
@@ -137,6 +138,7 @@ export default function WorkersPage() {
 
   const workerActions = (w: Worker): ActionItem[] => [
     { label: 'Fiche', icon: <Eye size={15} />, onClick: () => open('view', w) },
+    { label: 'Pointage', icon: <Fingerprint size={15} />, onClick: () => open('attendance', w) },
     { label: 'Historique', icon: <History size={15} />, onClick: () => open('history', w) },
     { label: 'Rapport', icon: <FileBarChart size={15} />, onClick: () => open('history', w, 'report') },
     { label: 'Heures supplémentaires', icon: <Clock size={15} />, onClick: () => open('overtime', w) },
@@ -258,6 +260,7 @@ export default function WorkersPage() {
                   {/* Actions */}
                   <div className="grid grid-cols-3 gap-1.5 mt-auto">
                     <ActionBtn icon={<Eye size={13} />} label="Fiche" onClick={() => open('view', w)} />
+                    <ActionBtn icon={<Fingerprint size={13} />} label="Pointage" onClick={() => open('attendance', w)} />
                     <ActionBtn icon={<History size={13} />} label="Historique" onClick={() => open('history', w)} />
                     <ActionBtn icon={<FileBarChart size={13} />} label="Rapport" onClick={() => open('history', w, 'report')} />
                     <ActionBtn
@@ -314,6 +317,10 @@ export default function WorkersPage() {
         {active && <WorkerOvertime worker={active} />}
       </Modal>
 
+      <Modal open={modal === 'attendance'} onClose={close} title={`Pointage — ${active?.fullName ?? ''}`} size="xl">
+        {active && <WorkerAttendance worker={active} />}
+      </Modal>
+
       <Modal open={modal === 'history'} onClose={close} title={`Historique — ${active?.fullName ?? ''}`} size="lg">
         {active && <WorkerHistory worker={active} roleName={roleName(active.roleId)} initialTab={historyTab} />}
       </Modal>
@@ -334,6 +341,11 @@ export default function WorkersPage() {
                   ? `${formatCurrency(active.paymentAmount)} / ${active.paymentType === 'monthly' ? 'mois' : 'jour'}`
                   : '—'}
               />
+              <Detail label="N° pointeuse" value={active.badgePin || '—'} />
+              <Detail
+                label="Horaires"
+                value={active.workStart || active.workEnd ? `${active.workStart || '—'} → ${active.workEnd || '—'}` : "Horaires de l'usine"}
+              />
               {active.hasAccount && <Detail label="Email" value={active.email} />}
               {active.hasAccount && <Detail label="Identifiant" value={active.username} />}
             </div>
@@ -343,7 +355,10 @@ export default function WorkersPage() {
               <Detail label="Paiements" value={String(active.payments.length)} />
               <Detail label="Heures sup." value={String((active.overtimes ?? []).length)} />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Button variant="liver" onClick={() => setModal('attendance')}>
+                <Fingerprint size={16} /> Pointage
+              </Button>
               <Button variant="secondary" onClick={() => { setHistoryTab('payments'); setModal('history'); }}>
                 <History size={16} /> Historique complet
               </Button>

@@ -425,6 +425,57 @@ export interface Worker {
   absences: Absence[];
   payments: WorkerPaymentRecord[];
   overtimes?: WorkerOvertime[];
+  /** N° d'utilisateur (PIN) sur la pointeuse ZKTeco. */
+  badgePin?: string;
+  /** Horaires propres à l'employé (HH:MM) — vides = horaires de l'usine. */
+  workStart?: string;
+  workEnd?: string;
+}
+
+// ---------- Pointeuse (ZKTeco) ----------
+export interface AttendancePunch {
+  id: number;
+  deviceSn: string;
+  pin: string;
+  workerId: string | null;
+  /** Heure LOCALE de la pointeuse : « AAAA-MM-JJTHH:MM:SS ». */
+  punchedAt: string;
+  status: number;
+  verify: number;
+  source: 'device' | 'manual';
+  note: string;
+}
+
+export interface AttendanceSettings {
+  workStart: string;
+  workEnd: string;
+  lateToleranceMin: number;
+  earlyToleranceMin: number;
+  minOvertimeMin: number;
+  /** 0 = dimanche … 6 = samedi */
+  restDays: number[];
+  deductAbsences: boolean;
+  deductLate: boolean;
+}
+
+export interface AttendanceDevice {
+  sn: string;
+  name: string;
+  ip: string;
+  pushVersion: string;
+  lastSeen: string | null;
+  lastPunchAt: string | null;
+}
+
+export interface AttendanceCommand {
+  id: number;
+  deviceSn: string;
+  command: string;
+  label: string;
+  status: 'pending' | 'sent' | 'done' | 'error';
+  returnCode: number | null;
+  createdAt: string;
+  doneAt: string | null;
 }
 
 // ---------- Expenses ----------

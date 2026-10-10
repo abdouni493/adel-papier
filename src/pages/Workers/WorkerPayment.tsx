@@ -1,5 +1,10 @@
-import { useMemo, useState } from 'react';
-import { Banknote, Clock, Printer, CheckCircle2, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Banknote, Clock, Printer, CheckCircle2, Trash2, Fingerprint } from 'lucide-react';
+import { Select } from '@/components/ui/Select';
+import { useAttendanceStore } from '@/store/attendanceStore';
+import {
+  computeMonth, attendancePay, currentMonth, lastMonths, monthRange, monthLabel, fmtMin,
+} from '@/lib/attendance';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -11,7 +16,7 @@ import { useLanguage } from '@/hooks/useLanguage';
 import { formatCurrency, formatDate, todayISO } from '@/lib/utils';
 import { printOvertimeReceipt } from '@/lib/documents';
 import { toast } from '@/components/ui/Toast';
-import type { Worker } from '@/types';
+import type { AttendancePunch, Worker } from '@/types';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -30,14 +35,32 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
 
   const [tab, setTab] = useState<'salary' | 'overtime'>('salary');
 
+  // ---- pointeuse ----
+  const { settings: attSettings, ready: attReady, loadMeta, fetchPunches } = useAttendanceStore();
+  const [attMonth, setAttMonth] = useState(currentMonth());
+  const [useAtt, setUseAtt] = useState(!!current.badgePin);
+  const [punches, setPunches] = useState<AttendancePunch[]>([]);
+  useEffect(() => { void loadMeta(); }, [loadMeta]);
+  useEffect(() => {
+    if (!useAtt) return;
+    const { from, to } = monthRange(attMonth);
+    void fetchPunches(from, to, worker.id).then(setPunches).catch(() => setPunches([]));
+  }, [useAtt, attMonth, worker.id, fetchPunches]);
+  const attSum = useMemo(() => computeMonth(attMonth, punches, current, attSettings), [attMonth, punches, current, attSettings]);
+  const attPay = useMemo(() => attendancePay(current, attSum, attSettings), [current, attSum, attSettings]);
+  const applyAtt = useAtt && attReady;
+
   // ---- salary ----
-  const base = current.paymentAmount;
+  const base = applyAtt ? attPay.base : current.paymentAmount;
+  const attDeduction = applyAtt ? attPay.absenceDeduction + attPay.lateDeduction : 0;
   const totalAcomptes = useMemo(() => current.acomptes.reduce((s, a) => s + a.amount, 0), [current]);
   const totalAbsences = useMemo(() => current.absences.reduce((s, a) => s + a.cost, 0), [current]);
-  const computed = Math.max(0, base - totalAcomptes - totalAbsences);
+  const computed = Math.max(0, base - totalAcomptes - totalAbsences - attDeduction);
 
   const [period, setPeriod] = useState('');
   const [net, setNet] = useState<number>(computed);
+  // le net suit le calcul (mois de pointage, cases cochées…) ; reste modifiable ensuite
+  useEffect(() => { setNet(computed); }, [computed]);
   const [date, setDate] = useState(todayISO());
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
@@ -60,9 +83,12 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
     try {
       await addPayment(worker.id, {
         date,
-        period: period || formatDate(date, language),
+        period: period || (applyAtt ? monthLabel(attMonth) : formatDate(date, language)),
         amount: Number(net),
-        description,
+        description: applyAtt
+          ? [description, `Pointage ${monthLabel(attMonth)} : ${attSum.presentDays}/${attSum.workingDays} j présents, ${attSum.absentDays} absence(s), retards ${fmtMin(attSum.lateMin)}`]
+              .filter(Boolean).join(' — ')
+          : description,
         kind: 'salary',
       });
       toast.success('Salaire payé — sortie de caisse enregistrée');
@@ -140,12 +166,64 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
 
       {tab === 'salary' ? (
         <div className="space-y-4">
+          {/* Pointeuse */}
+          <div className="rounded-xl border border-gold/20 bg-vanilla/40 p-3 space-y-2">
+            <div className="flex flex-wrap items-end gap-3">
+              <Checkbox
+                checked={useAtt}
+                onChange={setUseAtt}
+                label="Calculer avec la pointeuse"
+              />
+              {useAtt && (
+                <Select
+                  value={attMonth}
+                  onChange={(e) => { setAttMonth(e.target.value); setPeriod(monthLabel(e.target.value)); }}
+                  options={lastMonths(12)}
+                  className="max-w-[190px]"
+                />
+              )}
+            </div>
+            {useAtt && !attReady && (
+              <p className="text-xs text-caramel">Exécutez supabase/parts/10_pointeuse.sql pour activer la pointeuse.</p>
+            )}
+            {applyAtt && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <Mini2 label="Présent" value={`${attSum.presentDays} / ${attSum.workingDays} j`} />
+                <Mini2 label="Absences non justifiées" value={String(attSum.absentDays)} />
+                <Mini2 label="Retards" value={`${attSum.lateCount} · ${fmtMin(attSum.lateMin)}`} />
+                <Mini2 label="Heures sup. pointées" value={fmtMin(attSum.overtimeMin)} />
+              </div>
+            )}
+            {applyAtt && !current.badgePin && (
+              <p className="text-xs text-caramel flex items-center gap-1">
+                <Fingerprint size={12} /> Cet employé n'a pas de N° pointeuse : tous les jours compteront comme absences.
+              </p>
+            )}
+          </div>
+
           <Input label="Période" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="Ex : Juin 2026" />
 
           <div className="rounded-xl border border-gold/15 bg-gradient-card p-4 space-y-2 text-sm">
-            <Row label="Salaire de base" value={formatCurrency(base)} />
+            <Row
+              label={applyAtt && current.paymentType === 'daily'
+                ? `Salaire (${attSum.presentDays} j × ${formatCurrency(current.paymentAmount)})`
+                : 'Salaire de base'}
+              value={formatCurrency(base)}
+            />
             <Row label="Acomptes déduits" value={`- ${formatCurrency(totalAcomptes)}`} color="text-caramel" />
             <Row label="Absences déduites" value={`- ${formatCurrency(totalAbsences)}`} color="text-rose-deep" />
+            {applyAtt && current.paymentType !== 'daily' && (
+              <Row
+                label={`Absences pointeuse (${attSum.absentDays} j × ${formatCurrency(Math.round(attPay.dailyRate))})`}
+                value={`- ${formatCurrency(attPay.absenceDeduction)}`} color="text-rose-deep"
+              />
+            )}
+            {applyAtt && attSettings.deductLate && (
+              <Row
+                label={`Retards / départs anticipés (${fmtMin(attSum.lateMin + attSum.earlyMin)})`}
+                value={`- ${formatCurrency(attPay.lateDeduction)}`} color="text-rose-deep"
+              />
+            )}
             <div className="border-t border-gold/15 pt-2 flex justify-between font-bold">
               <span>Net à payer</span>
               <span className="tabular text-pistachio text-lg">{formatCurrency(computed)}</span>
@@ -308,6 +386,15 @@ function Row({ label, value, color = 'text-text-primary' }: { label: string; val
     <div className="flex justify-between">
       <span className="text-text-muted">{label}</span>
       <span className={`tabular ${color}`}>{value}</span>
+    </div>
+  );
+}
+
+function Mini2({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gold/10 bg-chocolate px-2 py-1.5">
+      <p className="text-[10px] text-text-muted">{label}</p>
+      <p className="font-bold tabular text-text-primary">{value}</p>
     </div>
   );
 }

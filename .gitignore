@@ -12,3 +12,7 @@ dist-ssr
 # local tooling
 .claude/settings.local.json
 *.tsbuildinfo
+
+# pointeuse (jeton secret + journaux)
+pointeuse/config.json
+pointeuse/bridge.log*

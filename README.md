@@ -69,3 +69,26 @@ React 18 · TypeScript · Vite · Tailwind CSS · Framer Motion · Zustand · Re
 - **Factures non comptabilisées** : factures, proformas ou bons de livraison seulement imprimés —
   aucun effet sur le stock, la caisse, la dette des clients ni les rapports.
 - **Fiches techniques** : photo du produit, et impression d'une **liste des prix** (produits cochés).
+
+## Pointeuse ZKTeco (K50 Pro) — présences, absences, paie
+
+La pointeuse envoie chaque pointage en temps réel (protocole **ZKTeco PUSH / ADMS** du SDK) à la
+passerelle `pointeuse/bridge.mjs`, lancée sur le PC relié à la pointeuse ; celle-ci l'enregistre
+dans Supabase. Écran **Pointage** (menu Gestion) : présents du jour, état mensuel, journal,
+connexion de la pointeuse, paramètres (horaires, tolérances, jours de repos, retenues).
+Chaque employé a un bouton **Pointage** (heure et minute d'entrée / de sortie de chaque jour,
+retards, départs anticipés, heures sup., absences) et la **Paie** peut se calculer avec la pointeuse.
+
+1. **SQL** : exécutez [`supabase/parts/10_pointeuse.sql`](supabase/parts/10_pointeuse.sql).
+2. **Jeton** : application › Pointage › onglet *Pointeuse* › *Copier* le jeton, puis collez-le dans
+   `pointeuse/config.json` (`"token": "…"`). Port par défaut : **8090**.
+3. **Pare-feu Windows** (PowerShell administrateur, une seule fois) :
+   `New-NetFirewallRule -DisplayName "Pointeuse ZKTeco 8090" -Direction Inbound -Protocol TCP -LocalPort 8090 -Action Allow`
+4. **Lancer** : `lancer-pointeuse.bat` (démarre aussi automatiquement à l'ouverture de session ;
+   page d'état : http://localhost:8090).
+5. **Sur la pointeuse** : Menu › COMM. › Ethernet : IP `192.168.1.201`, passerelle `192.168.1.1` ;
+   Menu › COMM. › Paramètres Serveur Cloud (ADMS) : adresse du serveur = IP du PC (`192.168.1.50`),
+   port `8090`, HTTPS désactivé, proxy désactivé.
+6. **Employés** : Employés › Modifier › *N° pointeuse* (= ID utilisateur sur la pointeuse) ;
+   enregistrer l'empreinte sur la pointeuse (Menu › Utilisateurs › Nouvel utilisateur, même ID) ou
+   à distance (bouton *Enregistrer l'empreinte à distance*).
