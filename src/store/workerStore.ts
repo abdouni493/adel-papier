@@ -4,7 +4,17 @@ import type {
 } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { db, rpc, remove as removeRow } from '@/lib/db';
-import { save } from '@/lib/persist';
+import { save, trySave } from '@/lib/persist';
+import { zkCommands } from '@/lib/attendance';
+
+/** Envoie automatiquement l'employé à la pointeuse (file attendance_commands). */
+async function pushToDevice(commands: { command: string; label: string }[]) {
+  if (!commands.length) return;
+  await trySave('attendance.autosync', async () => {
+    const { error } = await supabase.from('attendance_commands').insert(commands);
+    if (error) throw new Error(error.message);
+  });
+}
 
 /** Decimal hours between "fin du travail" and "fin des heures supplémentaires". */
 export function overtimeHours(
@@ -77,11 +87,15 @@ export const useWorkerStore = create<WorkerState>()((set, get) => {
       if (w.permissions && Object.keys(w.permissions).length) {
         await save('workers.permissions', () => rpc.setWorkerPermissions(row.id, w.permissions!));
       }
+      if (w.badgePin) {
+        await pushToDevice([{ command: zkCommands.userInfo(w.badgePin, w.fullName ?? ''), label: `Employé ${w.fullName}` }]);
+      }
       await reload();
       return get().workers.find((x) => x.id === row.id) ?? row;
     },
 
     updateWorker: async (id, data) => {
+      const before = get().workers.find((x) => x.id === id);
       const row = await save('workers.update', () => db.workers.update(id, data));
 
       if (data.hasAccount && data.email && data.password) {
@@ -89,12 +103,25 @@ export const useWorkerStore = create<WorkerState>()((set, get) => {
           rpc.createWorkerAccount(id, data.email!.trim(), data.password!, data.username?.trim() || undefined)
         );
       }
+      // pointeuse : N° ou nom modifié → mise à jour de l'appareil (l'ancien N° est retiré)
+      const pin = data.badgePin ?? before?.badgePin ?? '';
+      const name = data.fullName ?? before?.fullName ?? '';
+      const cmds: { command: string; label: string }[] = [];
+      if (before?.badgePin && before.badgePin !== pin) {
+        cmds.push({ command: zkCommands.deleteUser(before.badgePin), label: `Retrait N° ${before.badgePin}` });
+      }
+      if (pin && (pin !== before?.badgePin || name !== before?.fullName)) {
+        cmds.push({ command: zkCommands.userInfo(pin, name), label: `Employé ${name}` });
+      }
+      await pushToDevice(cmds);
       await reload();
       return get().workers.find((x) => x.id === id) ?? row;
     },
 
     deleteWorker: async (id) => {
+      const pin = get().workers.find((x) => x.id === id)?.badgePin;
       await save('workers.delete', () => db.workers.remove(id));
+      if (pin) await pushToDevice([{ command: zkCommands.deleteUser(pin), label: `Retrait N° ${pin}` }]);
       set({ workers: get().workers.filter((w) => w.id !== id) });
     },
 
