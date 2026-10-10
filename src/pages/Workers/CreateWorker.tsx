@@ -32,6 +32,10 @@ function randomPassword(): string {
 
 export function CreateWorker({ initial, onClose }: CreateWorkerProps) {
   const { roles, workers, addRole, addWorker, updateWorker } = useWorkerStore();
+  // N° pointeuse proposé automatiquement : le plus grand N° utilisé + 1 (1 pour le premier employé)
+  const nextPin = String(
+    workers.reduce((max, w) => Math.max(max, Number(w.badgePin) || 0), 0) + 1
+  );
 
   const [form, setForm] = useState({
     fullName: initial?.fullName || '',
@@ -47,7 +51,7 @@ export function CreateWorker({ initial, onClose }: CreateWorkerProps) {
     email: initial?.email || '',
     username: initial?.username || '',
     password: '',
-    badgePin: initial?.badgePin || '',
+    badgePin: initial ? initial.badgePin || '' : nextPin,
     workStart: initial?.workStart || '',
     workEnd: initial?.workEnd || '',
   });
