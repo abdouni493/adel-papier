@@ -82,8 +82,8 @@ retards, départs anticipés, heures sup., absences) et la **Paie** peut se calc
 1. **SQL** : exécutez [`supabase/parts/10_pointeuse.sql`](supabase/parts/10_pointeuse.sql).
 2. **Jeton** : application › Pointage › onglet *Pointeuse* › *Copier* le jeton, puis collez-le dans
    `pointeuse/config.json` (`"token": "…"`). Port par défaut : **8090**.
-3. **Pare-feu Windows** (PowerShell administrateur, une seule fois) :
-   `New-NetFirewallRule -DisplayName "Pointeuse ZKTeco 8090" -Direction Inbound -Protocol TCP -LocalPort 8090 -Action Allow`
+3. **Installation** (une seule fois) : double-cliquez `installer-pointeuse.bat` et acceptez la
+   demande administrateur — ouvre le port 8090 du pare-feu et crée le démarrage automatique.
 4. **Lancer** : `lancer-pointeuse.bat` (démarre aussi automatiquement à l'ouverture de session ;
    page d'état : http://localhost:8090).
 5. **Sur la pointeuse** : Menu › COMM. › Ethernet : IP `192.168.1.201`, passerelle `192.168.1.1` ;

@@ -3,7 +3,7 @@ import { supabase } from './supabase';
 import type {
   Product, Marque, Category, Unit, Supplier, Client, ClientDebt, Sale, Purchase, PurchaseReturn,
   Production, ComptoirItem, Destruction, Worker, Role, Expense, CaisseTransaction,
-  CaisseReport, StoreSettings, PartyPayment, CommandDelivery, WorkerOvertime,
+  CaisseReport, StoreSettings, PartyPayment, CommandDelivery, WorkerOvertime, WorkerLate,
   PurchaseOrder, PaymentMethodDetails, PartyOldDebt, PartyCreditRefund, PartyType,
   CommandAdjustment, DeliveryRecovery, FreeInvoice,
 } from '@/types';
@@ -248,6 +248,7 @@ const toWorker = (r: any): Worker => ({
     description: a.description ?? '', kind: a.kind ?? 'salary',
   })),
   overtimes: (r.worker_overtimes ?? []).map(toOvertime),
+  lates: (r.worker_lates ?? []).map(toLate),
   badgePin: r.badge_pin ?? '',
   workStart: r.work_start ? String(r.work_start).slice(0, 5) : '',
   workEnd: r.work_end ? String(r.work_end).slice(0, 5) : '',
@@ -269,6 +270,21 @@ const toOvertime = (r: any): WorkerOvertime => ({
   paidAt: r.paid_at ?? null,
   paymentId: r.payment_id ?? null,
   createdBy: r.created_by ?? undefined,
+  source: r.source === 'device' ? 'device' : 'manual',
+  excluded: r.excluded ?? false,
+});
+
+const toLate = (r: any): WorkerLate => ({
+  id: r.id,
+  workerId: r.worker_id,
+  date: r.date,
+  scheduleStart: r.schedule_start ?? '',
+  entryTime: r.entry_time ?? '',
+  minutes: Number(r.minutes ?? 0),
+  amount: num(r.amount),
+  status: r.status ?? 'pending',
+  paymentId: r.payment_id ?? null,
+  appliedAt: r.applied_at ?? null,
 });
 
 const toPartyPayment = (idKey: string, nameKey: string) => (r: any): PartyPayment => ({
@@ -1048,6 +1064,12 @@ export const db = {
     list: async (): Promise<Worker[]> => {
       const full = '*, worker_acomptes(*), worker_absences(*), worker_payments(*), worker_overtimes(*)';
       try {
+        return (await select<any>('workers', `${full}, worker_lates(*)`)).map(toWorker);
+      } catch (e) {
+        if (!isMissingSchema((e as Error).message) && !/relationship|worker_lates/i.test((e as Error).message)) throw e;
+      }
+      try {
+        // retards (partie 11) pas encore déployés
         return (await select<any>('workers', full)).map(toWorker);
       } catch (e) {
         if (!isMissingSchema((e as Error).message)) throw e;

@@ -455,7 +455,7 @@ function SettingsForm({ initial, onSave }: { initial: AttendanceSettings; onSave
         <Input label="Fin de travail" type="time" value={f.workEnd} onChange={(e) => set('workEnd', e.target.value)} />
         <Input label="Tolérance retard (min)" type="number" value={f.lateToleranceMin} onChange={(e) => set('lateToleranceMin', Number(e.target.value))} />
         <Input label="Tolérance départ anticipé (min)" type="number" value={f.earlyToleranceMin} onChange={(e) => set('earlyToleranceMin', Number(e.target.value))} />
-        <Input label="Heures sup. à partir de (min)" type="number" value={f.minOvertimeMin} onChange={(e) => set('minOvertimeMin', Number(e.target.value))} />
+        <Input label="Heures sup. après la fin de travail + (min)" type="number" value={f.minOvertimeMin} onChange={(e) => set('minOvertimeMin', Number(e.target.value))} />
       </div>
       <div>
         <p className="text-sm font-medium text-text-secondary mb-2">Jours de repos</p>
@@ -476,7 +476,7 @@ function SettingsForm({ initial, onSave }: { initial: AttendanceSettings; onSave
       </div>
       <div className="space-y-2">
         <Switch checked={f.deductAbsences} onChange={(v) => set('deductAbsences', v)} label="Déduire les absences non justifiées du salaire mensuel" />
-        <Switch checked={f.deductLate} onChange={(v) => set('deductLate', v)} label="Déduire les retards et départs anticipés (à la minute)" />
+        <Switch checked={f.deductLate} onChange={(v) => set('deductLate', v)} label="Paie : retards cochés (déduits) par défaut" />
       </div>
       <p className="text-xs text-text-muted">
         Taux journalier = salaire mensuel ÷ jours ouvrables du mois. Un employé journalier est payé pour chaque jour pointé.

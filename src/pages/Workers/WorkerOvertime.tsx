@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Clock, Plus, Pencil, Trash2, Printer, CheckCircle2, Timer, Coins } from 'lucide-react';
+import { Clock, Plus, Pencil, Trash2, Printer, CheckCircle2, Timer, Coins, EyeOff, Eye, Fingerprint, RefreshCw } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -7,6 +7,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useWorkerStore, overtimeHours } from '@/store/workerStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useAttendanceStore } from '@/store/attendanceStore';
+import { useAttendanceSync } from '@/hooks/useAttendanceSync';
 import { formatCurrency, formatDate, todayISO } from '@/lib/utils';
 import { printOvertimeReceipt } from '@/lib/documents';
 import { toast } from '@/components/ui/Toast';
@@ -27,10 +29,15 @@ function parseTime(v: string): { h: number; m: number } {
  * heures supplémentaires : la durée puis le montant à payer sont calculés
  * automatiquement (durée × taux horaire), avec possibilité de corriger le
  * total à la main.
+ *
+ * Les heures sup. de la pointeuse sont créées automatiquement : elles
+ * commencent à la fin du travail + le délai des paramètres (16:00 → 16:20).
  */
 export function WorkerOvertime({ worker }: { worker: Worker }) {
   const workers = useWorkerStore((s) => s.workers);
-  const { addOvertime, updateOvertime, deleteOvertime } = useWorkerStore();
+  const { addOvertime, updateOvertime, deleteOvertime, setOvertimeExcluded } = useWorkerStore();
+  const { syncing, resync } = useAttendanceSync(worker.id);
+  const graceMin = useAttendanceStore((s) => s.settings.minOvertimeMin);
   const settings = useSettingsStore((s) => s.settings);
   const current = workers.find((w) => w.id === worker.id) || worker;
   const overtimes = useMemo(
@@ -56,10 +63,11 @@ export function WorkerOvertime({ worker }: { worker: Worker }) {
   const effectiveAmount = amountEdited ? Number(amount) || 0 : computedAmount;
 
   const totals = useMemo(() => {
-    const unpaid = overtimes.filter((o) => !o.isPaid);
+    const active = overtimes.filter((o) => !o.excluded);
+    const unpaid = active.filter((o) => !o.isPaid);
     return {
-      hours: overtimes.reduce((s, o) => s + o.hours, 0),
-      amount: overtimes.reduce((s, o) => s + o.amount, 0),
+      hours: active.reduce((s, o) => s + o.hours, 0),
+      amount: active.reduce((s, o) => s + o.amount, 0),
       unpaidHours: unpaid.reduce((s, o) => s + o.hours, 0),
       unpaidAmount: unpaid.reduce((s, o) => s + o.amount, 0),
       unpaidCount: unpaid.length,
@@ -140,6 +148,20 @@ export function WorkerOvertime({ worker }: { worker: Worker }) {
         <Tile label="Montant total" value={formatCurrency(totals.amount)} color="text-gold-dark" icon={<Coins size={15} />} />
         <Tile label="Heures non payées" value={`${totals.unpaidHours.toFixed(2)} h`} color="text-caramel" icon={<Clock size={15} />} />
         <Tile label="Reste à payer" value={formatCurrency(totals.unpaidAmount)} color="text-rose-deep" icon={<Coins size={15} />} />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-pistachio/25 bg-pistachio/5 px-3 py-2 text-xs text-text-secondary">
+        <span className="flex items-center gap-1.5">
+          <Fingerprint size={13} className="text-pistachio" />
+          {current.badgePin
+            ? `Calcul automatique depuis la pointeuse : heures sup. comptées après la fin du travail + ${graceMin} min.`
+            : "Sans N° pointeuse : seules les heures saisies à la main sont comptées."}
+        </span>
+        {current.badgePin && (
+          <Button size="sm" variant="ghost" onClick={() => void resync()} disabled={syncing}>
+            <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} /> Recalculer
+          </Button>
+        )}
       </div>
 
       {/* Form */}
@@ -235,8 +257,11 @@ export function WorkerOvertime({ worker }: { worker: Worker }) {
               </thead>
               <tbody>
                 {overtimes.map((o) => (
-                  <tr key={o.id} className="border-t border-gold/10">
-                    <td className="px-3 py-2 text-xs">{formatDate(o.date)}</td>
+                  <tr key={o.id} className={`border-t border-gold/10 ${o.excluded ? 'opacity-50' : ''}`}>
+                    <td className="px-3 py-2 text-xs">
+                      {formatDate(o.date)}
+                      {o.source === 'device' && <Fingerprint size={11} className="inline ml-1 text-pistachio" aria-label="Pointeuse" />}
+                    </td>
                     <td className="px-3 py-2 text-center text-xs tabular">
                       {pad(o.workEndHour)}:{pad(o.workEndMinute)} → {pad(o.overtimeEndHour)}:{pad(o.overtimeEndMinute)}
                     </td>
@@ -246,6 +271,8 @@ export function WorkerOvertime({ worker }: { worker: Worker }) {
                     <td className="px-3 py-2 text-center">
                       {o.isPaid ? (
                         <Badge variant="success" className="gap-1"><CheckCircle2 size={10} /> Payée</Badge>
+                      ) : o.excluded ? (
+                        <Badge variant="neutral">Exclue</Badge>
                       ) : (
                         <Badge variant="warning">Non payée</Badge>
                       )}
@@ -257,12 +284,22 @@ export function WorkerOvertime({ worker }: { worker: Worker }) {
                         </Button>
                         {!o.isPaid && (
                           <>
+                            <Button
+                              size="icon" variant="ghost"
+                              title={o.excluded ? 'Réactiver (compter dans la paie)' : 'Exclure des calculs'}
+                              onClick={() => void setOvertimeExcluded(o.id, !o.excluded)}
+                            >
+                              {o.excluded ? <Eye size={14} className="text-pistachio" /> : <EyeOff size={14} />}
+                            </Button>
                             <Button size="icon" variant="ghost" title="Modifier" onClick={() => startEdit(o)}>
                               <Pencil size={14} />
                             </Button>
-                            <Button size="icon" variant="ghost" title="Supprimer" onClick={() => setDeleteId(o.id)}>
-                              <Trash2 size={14} className="text-rose-deep" />
-                            </Button>
+                            {/* une ligne de la pointeuse serait recréée : on l'exclut au lieu de la supprimer */}
+                            {o.source !== 'device' && (
+                              <Button size="icon" variant="ghost" title="Supprimer" onClick={() => setDeleteId(o.id)}>
+                                <Trash2 size={14} className="text-rose-deep" />
+                              </Button>
+                            )}
                           </>
                         )}
                       </div>

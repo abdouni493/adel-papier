@@ -14,7 +14,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { usePermissions } from '@/hooks/usePermissions';
 import {
   computeMonth, attendancePay, currentMonth, lastMonths, monthRange, monthLabel, fmtMin,
-  punchTimeSec, verifyLabel, WEEKDAYS, STATUS_LABEL, zkCommands, toMin,
+  punchTimeSec, verifyLabel, WEEKDAYS, STATUS_LABEL, zkCommands, toMin, overtimeStart,
   type DayRecord,
 } from '@/lib/attendance';
 import { printDetailedReport } from '@/lib/reportPrint';
@@ -100,7 +100,7 @@ export function WorkerAttendance({ worker }: { worker: Worker }) {
     const rate = live.paymentType === 'daily'
       ? live.paymentAmount / (sum.scheduledMinPerDay / 60)
       : pay.dailyRate / (sum.scheduledMinPerDay / 60);
-    const [eh, em] = d.scheduleEnd.split(':').map(Number);
+    const [eh, em] = overtimeStart(d.scheduleEnd, settings).split(':').map(Number);
     const [xh, xm] = d.exit.split(':').map(Number);
     await addOvertime({
       workerId: live.id, date: d.date,
@@ -130,7 +130,7 @@ export function WorkerAttendance({ worker }: { worker: Worker }) {
         { label: 'Départs anticipés', value: `${sum.earlyCount} · ${fmtMin(sum.earlyMin)}` },
         { label: 'Heures travaillées', value: fmtMin(sum.workedMin) },
         { label: 'Heures sup.', value: fmtMin(sum.overtimeMin), tone: 'pos' },
-        { label: 'Retenues pointage', value: formatCurrency(pay.absenceDeduction + pay.lateDeduction), tone: 'neg' },
+        { label: 'Retenues absences', value: formatCurrency(pay.absenceDeduction), tone: 'neg' },
       ],
       sections: [{
         title: 'Détail journalier',
@@ -224,9 +224,8 @@ export function WorkerAttendance({ worker }: { worker: Worker }) {
             </p>
           )}
           <p className="text-text-muted">
-            Retards + départs anticipés : {settings.deductLate
-              ? <b className="text-rose-deep">- {formatCurrency(pay.lateDeduction)}</b>
-              : 'non déduits (Pointage › Paramètres)'}
+            Retards : <b className="text-rose-deep">{fmtMin(sum.lateMin)} ≈ {formatCurrency(Math.round(sum.lateMin * pay.minuteRate))}</b>
+            {' '}· heures sup. comptées après {overtimeStart(sum.days[0]?.scheduleEnd ?? settings.workEnd, settings)} — à régler dans « Paie »
           </p>
         </div>
       )}

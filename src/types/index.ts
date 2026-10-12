@@ -425,6 +425,8 @@ export interface Worker {
   absences: Absence[];
   payments: WorkerPaymentRecord[];
   overtimes?: WorkerOvertime[];
+  /** Retards calculés depuis la pointeuse. */
+  lates?: WorkerLate[];
   /** N° d'utilisateur (PIN) sur la pointeuse ZKTeco. */
   badgePin?: string;
   /** Horaires propres à l'employé (HH:MM) — vides = horaires de l'usine. */
@@ -937,6 +939,25 @@ export interface WorkerOvertime {
   paidAt?: string | null;
   paymentId?: string | null;
   createdBy?: string;
+  /** 'device' = calculées automatiquement depuis la pointeuse */
+  source?: 'manual' | 'device';
+  /** retirées définitivement des calculs (réactivables depuis l'historique) */
+  excluded?: boolean;
+}
+
+// ---------- Retards d'un employé (pointeuse) ----------
+export interface WorkerLate {
+  id: string;
+  workerId: string;
+  date: string;
+  scheduleStart: string;    // HH:MM
+  entryTime: string;        // HH:MM
+  minutes: number;
+  amount: number;           // retenue correspondante
+  /** pending = à régler · applied = déduit d'un salaire · excluded = retiré des calculs */
+  status: 'pending' | 'applied' | 'excluded';
+  paymentId?: string | null;
+  appliedAt?: string | null;
 }
 
 // ---------- Bon de commande (interface Dépenses) ----------

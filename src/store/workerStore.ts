@@ -5,7 +5,7 @@ import type {
 import { supabase } from '@/lib/supabase';
 import { db, rpc, remove as removeRow } from '@/lib/db';
 import { save, trySave } from '@/lib/persist';
-import { zkCommands } from '@/lib/attendance';
+import { zkCommands, type AutoOvertime, type AutoLate } from '@/lib/attendance';
 
 /** Envoie automatiquement l'employé à la pointeuse (file attendance_commands). */
 async function pushToDevice(commands: { command: string; label: string }[]) {
@@ -47,7 +47,17 @@ interface WorkerState {
   updateOvertime: (id: string, data: Partial<WorkerOvertime>) => Promise<void>;
   deleteOvertime: (workerId: string, id: string) => Promise<void>;
   payOvertimes: (workerId: string, ids: string[], date?: string, description?: string) => Promise<void>;
+  // ---- pointeuse → paie ----
+  /** Crée / met à jour / retire les heures sup. et retards calculés depuis la pointeuse (dates de `from` à `to`). */
+  syncAttendance: (workerId: string, from: string, to: string, items: { overtimes: AutoOvertime[]; lates: AutoLate[] }) => Promise<void>;
+  setOvertimeExcluded: (id: string, excluded: boolean) => Promise<void>;
+  setLateStatus: (id: string, status: 'pending' | 'excluded') => Promise<void>;
+  /** Salaire + heures sup. incluses (paiement séparé) + retards déduits. */
+  paySalary: (workerId: string, p: Omit<WorkerPaymentRecord, 'id'>, settle: { overtimeIds: string[]; lateIds: string[] }) => Promise<void>;
 }
+
+const fail = (error: { message: string } | null) => { if (error) throw new Error(error.message); };
+const hm = (t: string) => t.split(':').map(Number) as [number, number];
 
 const overtimePayload = (d: Partial<WorkerOvertime>) => ({
   worker_id: d.workerId,
@@ -201,6 +211,99 @@ export const useWorkerStore = create<WorkerState>()((set, get) => {
       await save('workers.overtime.pay', () =>
         rpc.payWorkerOvertimes(workerId, ids, date, description ?? 'Paiement heures supplémentaires')
       );
+      await reload();
+    },
+
+    syncAttendance: async (workerId, from, to, items) => {
+      const w = get().workers.find((x) => x.id === workerId);
+      if (!w) return;
+      const inRange = (d: string) => d.slice(0, 10) >= from && d.slice(0, 10) <= to;
+      let changed = false;
+      await trySave('workers.attendance.sync', async () => {
+        // ---- heures sup. ----
+        const existing = (w.overtimes ?? []).filter((o) => inRange(o.date));
+        const auto = new Map(items.overtimes.map((o) => [o.date, o]));
+        for (const o of existing.filter((x) => x.source === 'device' && !x.isPaid && !x.excluded)) {
+          const a = auto.get(o.date.slice(0, 10));
+          if (!a) {
+            fail((await supabase.from('worker_overtimes').delete().eq('id', o.id)).error); changed = true;
+          } else if (Math.round(o.hours * 60) !== a.minutes || o.amount !== a.amount) {
+            const [fh, fm] = hm(a.from); const [th, tm] = hm(a.to);
+            fail((await supabase.from('worker_overtimes').update({
+              work_end_hour: fh, work_end_minute: fm, overtime_end_hour: th, overtime_end_minute: tm,
+              hours: Math.round((a.minutes / 60) * 100) / 100, hourly_rate: a.hourlyRate, amount: a.amount,
+            }).eq('id', o.id)).error);
+            changed = true;
+          }
+        }
+        // un jour qui a déjà des heures sup. (saisies ou pointeuse) n'est pas recréé
+        const known = new Set(existing.map((o) => o.date.slice(0, 10)));
+        const toInsert = items.overtimes.filter((a) => !known.has(a.date)).map((a) => {
+          const [fh, fm] = hm(a.from); const [th, tm] = hm(a.to);
+          return {
+            worker_id: workerId, date: a.date, work_end_hour: fh, work_end_minute: fm,
+            overtime_end_hour: th, overtime_end_minute: tm, hours: Math.round((a.minutes / 60) * 100) / 100,
+            hourly_rate: a.hourlyRate, amount: a.amount, description: 'Pointeuse', source: 'device',
+          };
+        });
+        if (toInsert.length) { fail((await supabase.from('worker_overtimes').insert(toInsert)).error); changed = true; }
+
+        // ---- retards ----
+        const lates = (w.lates ?? []).filter((l) => inRange(l.date));
+        const autoL = new Map(items.lates.map((l) => [l.date, l]));
+        for (const l of lates.filter((x) => x.status === 'pending')) {
+          const a = autoL.get(l.date.slice(0, 10));
+          if (!a) {
+            fail((await supabase.from('worker_lates').delete().eq('id', l.id)).error); changed = true;
+          } else if (l.minutes !== a.minutes || l.amount !== a.amount || l.entryTime !== a.entry) {
+            fail((await supabase.from('worker_lates').update({
+              minutes: a.minutes, amount: a.amount, entry_time: a.entry, schedule_start: a.scheduleStart,
+            }).eq('id', l.id)).error);
+            changed = true;
+          }
+        }
+        const knownL = new Set(lates.map((l) => l.date.slice(0, 10)));
+        const lateInsert = items.lates.filter((a) => !knownL.has(a.date)).map((a) => ({
+          worker_id: workerId, date: a.date, schedule_start: a.scheduleStart, entry_time: a.entry,
+          minutes: a.minutes, amount: a.amount,
+        }));
+        if (lateInsert.length) { fail((await supabase.from('worker_lates').insert(lateInsert)).error); changed = true; }
+      });
+      if (changed) await reload();
+    },
+
+    setOvertimeExcluded: async (id, excluded) => {
+      await save('workers.overtime.exclude', async () =>
+        fail((await supabase.from('worker_overtimes').update({ excluded }).eq('id', id)).error));
+      await reload();
+    },
+
+    setLateStatus: async (id, status) => {
+      await save('workers.late.status', async () =>
+        fail((await supabase.from('worker_lates').update({ status, payment_id: null, applied_at: null }).eq('id', id)).error));
+      await reload();
+    },
+
+    paySalary: async (workerId, p, { overtimeIds, lateIds }) => {
+      const w = get().workers.find((x) => x.id === workerId);
+      const overtimeTotal = (w?.overtimes ?? []).filter((o) => overtimeIds.includes(o.id)).reduce((s, o) => s + o.amount, 0);
+      if (overtimeIds.length && overtimeTotal > 0) {
+        await save('workers.overtime.pay', () =>
+          rpc.payWorkerOvertimes(workerId, overtimeIds, p.date, `Heures supplémentaires — ${p.period}`));
+      }
+      const salary = Math.round((p.amount - overtimeTotal) * 100) / 100;
+      let paymentId: string | null = null;
+      if (salary > 0) {
+        const row = await save('workers.payment', () =>
+          rpc.payWorkerSalary(workerId, salary, p.period, p.date, p.description));
+        paymentId = (row as { id?: string } | null)?.id ?? null;
+      }
+      if (lateIds.length) {
+        await save('workers.late.apply', async () =>
+          fail((await supabase.from('worker_lates')
+            .update({ status: 'applied', payment_id: paymentId, applied_at: p.date })
+            .in('id', lateIds)).error));
+      }
       await reload();
     },
   };

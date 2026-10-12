@@ -170,12 +170,17 @@ function statusPage() {
 <script>setTimeout(()=>location.reload(),5000)</script>`;
 }
 
+const seenIps = new Set();
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const p = url.pathname.toLowerCase();
   const sn = url.searchParams.get('SN') ?? url.searchParams.get('sn') ?? '';
   const ip = (req.socket.remoteAddress ?? '').replace('::ffff:', '');
   if (sn) stats.devices.set(sn, { ip, at: Date.now() });
+  if (!seenIps.has(ip) && ip !== '127.0.0.1' && ip !== '::1') {
+    seenIps.add(ip);
+    log(`Première requête de ${ip} : ${req.method} ${req.url}`);
+  }
 
   try {
     // ---- initialisation

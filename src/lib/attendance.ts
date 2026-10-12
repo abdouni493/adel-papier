@@ -14,7 +14,8 @@ export const DEFAULT_ATTENDANCE_SETTINGS: AttendanceSettings = {
   workEnd: '16:00',
   lateToleranceMin: 10,
   earlyToleranceMin: 10,
-  minOvertimeMin: 30,
+  /** les heures sup. commencent à la fin du travail + ce délai (16:00 → 16:20) */
+  minOvertimeMin: 20,
   restDays: [5],
   deductAbsences: true,
   deductLate: false,
@@ -154,7 +155,8 @@ export function computeDay(
 
   const late = entryMin - startMin;
   const early = exitMin !== null ? endMin - exitMin : 0;
-  const over = exitMin !== null ? exitMin - endMin : 0;
+  // heures sup. comptées à partir de la fin du travail + délai (16:00 + 20 min → 16:20)
+  const over = exitMin !== null ? exitMin - (endMin + s.minOvertimeMin) : 0;
 
   return {
     ...base,
@@ -164,7 +166,7 @@ export function computeDay(
     workedMin: exitMin !== null ? exitMin - entryMin : 0,
     lateMin: !isRest && late > s.lateToleranceMin ? late : 0,
     earlyMin: !isRest && exitMin !== null && early > s.earlyToleranceMin ? early : 0,
-    overtimeMin: exitMin !== null && over >= s.minOvertimeMin ? over : 0,
+    overtimeMin: exitMin !== null && over > 0 ? over : 0,
     missingExit: !hasExit && date < today,
   };
 }
@@ -237,6 +239,55 @@ export function attendancePay(worker: Worker, sum: MonthSummary, s: AttendanceSe
     absenceDeduction: !daily && s.deductAbsences ? round(sum.absentDays * dailyRate) : 0,
     lateDeduction: s.deductLate ? round((sum.lateMin + sum.earlyMin) * minuteRate) : 0,
   };
+}
+
+/** Heure (HH:MM) à partir de laquelle les heures sup. sont comptées. */
+export const overtimeStart = (scheduleEnd: string, s: AttendanceSettings) => {
+  const m = toMin(scheduleEnd) + s.minOvertimeMin;
+  return `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
+};
+
+// ------------------------------------------- heures sup. / retards auto --
+export interface AutoOvertime {
+  date: string;
+  from: string;      // fin du travail + délai
+  to: string;        // sortie pointée
+  minutes: number;
+  hourlyRate: number;
+  amount: number;
+}
+export interface AutoLate {
+  date: string;
+  scheduleStart: string;
+  entry: string;
+  minutes: number;
+  amount: number;
+}
+
+/**
+ * Heures sup. et retards déduits des pointages d'un mois, chiffrés au taux de
+ * l'employé (taux horaire = taux journalier ÷ durée de la journée).
+ */
+export function attendanceItems(sum: MonthSummary, pay: AttendancePay, s: AttendanceSettings) {
+  const hourlyRate = pay.minuteRate * 60;
+  const overtimes: AutoOvertime[] = [];
+  const lates: AutoLate[] = [];
+  for (const d of sum.days) {
+    if (d.status !== 'present') continue;
+    if (d.overtimeMin > 0 && d.exit) {
+      overtimes.push({
+        date: d.date, from: overtimeStart(d.scheduleEnd, s), to: d.exit, minutes: d.overtimeMin,
+        hourlyRate: Math.round(hourlyRate), amount: Math.round((d.overtimeMin / 60) * hourlyRate),
+      });
+    }
+    if (d.lateMin > 0 && d.entry) {
+      lates.push({
+        date: d.date, scheduleStart: d.scheduleStart, entry: d.entry, minutes: d.lateMin,
+        amount: Math.round(d.lateMin * pay.minuteRate),
+      });
+    }
+  }
+  return { overtimes, lates };
 }
 
 export const STATUS_LABEL: Record<DayStatus, string> = {

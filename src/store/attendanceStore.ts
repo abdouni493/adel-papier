@@ -26,7 +26,7 @@ const toSettings = (r: any): AttendanceSettings => ({
   workEnd: String(r.work_end ?? '16:00').slice(0, 5),
   lateToleranceMin: Number(r.late_tolerance_min ?? 10),
   earlyToleranceMin: Number(r.early_tolerance_min ?? 10),
-  minOvertimeMin: Number(r.min_overtime_min ?? 30),
+  minOvertimeMin: Number(r.min_overtime_min ?? 20),
   restDays: (r.rest_days ?? [5]).map(Number),
   deductAbsences: r.deduct_absences ?? true,
   deductLate: r.deduct_late ?? false,

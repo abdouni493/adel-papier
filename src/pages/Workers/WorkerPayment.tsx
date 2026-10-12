@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Banknote, Clock, Printer, CheckCircle2, Trash2, Fingerprint } from 'lucide-react';
+import { Banknote, Clock, Printer, CheckCircle2, Trash2, Fingerprint, EyeOff, AlertTriangle } from 'lucide-react';
 import { Select } from '@/components/ui/Select';
 import { useAttendanceStore } from '@/store/attendanceStore';
+import { useAttendanceSync } from '@/hooks/useAttendanceSync';
 import {
   computeMonth, attendancePay, currentMonth, lastMonths, monthRange, monthLabel, fmtMin,
 } from '@/lib/attendance';
@@ -22,13 +23,17 @@ const pad = (n: number) => String(n).padStart(2, '0');
 
 /**
  * Paiement d'un employé.
- *  · onglet « Salaire » : salaire de base − acomptes − absences,
+ *  · onglet « Salaire » : salaire de base − acomptes − absences − retards
+ *    cochés + heures sup. cochées (calculées depuis la pointeuse) ; chaque
+ *    ligne peut être laissée pour plus tard ou exclue définitivement
+ *    (réactivable depuis l'historique),
  *  · onglet « Heures supplémentaires » : liste des heures NON PAYÉES ; une fois
  *    réglées elles disparaissent de cet écran et apparaissent dans l'historique.
  */
 export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: () => void }) {
   const { t, language } = useLanguage();
-  const { addPayment, deletePayment, payOvertimes } = useWorkerStore();
+  const { paySalary, deletePayment, payOvertimes, setOvertimeExcluded, setLateStatus } = useWorkerStore();
+  const { syncing } = useAttendanceSync(worker.id);
   const workers = useWorkerStore((s) => s.workers);
   const settings = useSettingsStore((s) => s.settings);
   const current = workers.find((w) => w.id === worker.id) || worker;
@@ -52,10 +57,28 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
 
   // ---- salary ----
   const base = applyAtt ? attPay.base : current.paymentAmount;
-  const attDeduction = applyAtt ? attPay.absenceDeduction + attPay.lateDeduction : 0;
+  const attDeduction = applyAtt ? attPay.absenceDeduction : 0;
   const totalAcomptes = useMemo(() => current.acomptes.reduce((s, a) => s + a.amount, 0), [current]);
   const totalAbsences = useMemo(() => current.absences.reduce((s, a) => s + a.cost, 0), [current]);
-  const computed = Math.max(0, base - totalAcomptes - totalAbsences - attDeduction);
+
+  // ---- heures sup. non payées / retards non réglés (pointeuse + saisies) ----
+  const unpaidOvertimes = useMemo(
+    () => (current.overtimes ?? []).filter((o) => !o.isPaid && !o.excluded).sort((a, b) => a.date.localeCompare(b.date)),
+    [current.overtimes]
+  );
+  const pendingLates = useMemo(
+    () => (current.lates ?? []).filter((l) => l.status === 'pending').sort((a, b) => a.date.localeCompare(b.date)),
+    [current.lates]
+  );
+  const [otOn, setOtOn] = useState<Record<string, boolean>>({});
+  const [lateOn, setLateOn] = useState<Record<string, boolean>>({});
+  const otIncluded = unpaidOvertimes.filter((o) => otOn[o.id] ?? true);
+  const lateIncluded = pendingLates.filter((l) => lateOn[l.id] ?? attSettings.deductLate);
+  const otIncludedTotal = otIncluded.reduce((s, o) => s + o.amount, 0);
+  const lateIncludedTotal = lateIncluded.reduce((s, l) => s + l.amount, 0);
+  const lateIncludedMin = lateIncluded.reduce((s, l) => s + l.minutes, 0);
+
+  const computed = Math.max(0, base - totalAcomptes - totalAbsences - attDeduction - lateIncludedTotal + otIncludedTotal);
 
   const [period, setPeriod] = useState('');
   const [net, setNet] = useState<number>(computed);
@@ -67,10 +90,6 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
   const [deletePaymentId, setDeletePaymentId] = useState<string | null>(null);
 
   // ---- overtime ----
-  const unpaidOvertimes = useMemo(
-    () => (current.overtimes ?? []).filter((o) => !o.isPaid).sort((a, b) => a.date.localeCompare(b.date)),
-    [current.overtimes]
-  );
   const [selected, setSelected] = useState<string[]>([]);
   const [otDate, setOtDate] = useState(todayISO());
   const selectedList = unpaidOvertimes.filter((o) => selected.includes(o.id));
@@ -81,16 +100,18 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
     if (net <= 0) { toast.error('Montant invalide'); return; }
     setSaving(true);
     try {
-      await addPayment(worker.id, {
+      await paySalary(worker.id, {
         date,
         period: period || (applyAtt ? monthLabel(attMonth) : formatDate(date, language)),
         amount: Number(net),
-        description: applyAtt
-          ? [description, `Pointage ${monthLabel(attMonth)} : ${attSum.presentDays}/${attSum.workingDays} j présents, ${attSum.absentDays} absence(s), retards ${fmtMin(attSum.lateMin)}`]
-              .filter(Boolean).join(' — ')
-          : description,
+        description: [
+          description,
+          applyAtt ? `Pointage ${monthLabel(attMonth)} : ${attSum.presentDays}/${attSum.workingDays} j présents, ${attSum.absentDays} absence(s)` : '',
+          lateIncluded.length ? `Retards déduits : ${fmtMin(lateIncludedMin)} (${formatCurrency(lateIncludedTotal)})` : '',
+          otIncluded.length ? `Heures sup. incluses : ${formatCurrency(otIncludedTotal)}` : '',
+        ].filter(Boolean).join(' — '),
         kind: 'salary',
-      });
+      }, { overtimeIds: otIncluded.map((o) => o.id), lateIds: lateIncluded.map((l) => l.id) });
       toast.success('Salaire payé — sortie de caisse enregistrée');
       onClose();
     } finally {
@@ -201,6 +222,46 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
             )}
           </div>
 
+          {syncing && <p className="text-[11px] text-text-muted">Calcul des heures sup. et retards depuis la pointeuse…</p>}
+
+          {/* heures sup. non payées */}
+          <PendingList
+            title="Heures supplémentaires non payées"
+            icon={<Clock size={14} className="text-pistachio" />}
+            empty="Aucune heure supplémentaire en attente"
+            hint={`Comptées à partir de la fin du travail + ${attSettings.minOvertimeMin} min. Cochées = ajoutées à ce paiement.`}
+            rows={unpaidOvertimes.map((o) => ({
+              id: o.id,
+              on: otOn[o.id] ?? true,
+              date: formatDate(o.date, language),
+              detail: `${pad(o.workEndHour)}:${pad(o.workEndMinute)} → ${pad(o.overtimeEndHour)}:${pad(o.overtimeEndMinute)} · ${o.hours.toFixed(2)} h${o.source === 'device' ? ' · pointeuse' : ''}`,
+              amount: `+ ${formatCurrency(o.amount)}`,
+              tone: 'text-pistachio',
+            }))}
+            onToggle={(id, v) => setOtOn((m) => ({ ...m, [id]: v }))}
+            onAll={(v) => setOtOn(Object.fromEntries(unpaidOvertimes.map((o) => [o.id, v])))}
+            onExclude={(id) => void setOvertimeExcluded(id, true).then(() => toast.success("Exclue — réactivable depuis l'historique"))}
+          />
+
+          {/* retards non réglés */}
+          <PendingList
+            title="Retards non réglés"
+            icon={<AlertTriangle size={14} className="text-caramel" />}
+            empty="Aucun retard en attente"
+            hint={`Calculés depuis l'heure de début de travail (tolérance ${attSettings.lateToleranceMin} min). Cochés = déduits de ce paiement.`}
+            rows={pendingLates.map((l) => ({
+              id: l.id,
+              on: lateOn[l.id] ?? attSettings.deductLate,
+              date: formatDate(l.date, language),
+              detail: `prévu ${l.scheduleStart} · arrivé ${l.entryTime} · ${fmtMin(l.minutes)}`,
+              amount: `- ${formatCurrency(l.amount)}`,
+              tone: 'text-rose-deep',
+            }))}
+            onToggle={(id, v) => setLateOn((m) => ({ ...m, [id]: v }))}
+            onAll={(v) => setLateOn(Object.fromEntries(pendingLates.map((l) => [l.id, v])))}
+            onExclude={(id) => void setLateStatus(id, 'excluded').then(() => toast.success("Exclu — réactivable depuis l'historique"))}
+          />
+
           <Input label="Période" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="Ex : Juin 2026" />
 
           <div className="rounded-xl border border-gold/15 bg-gradient-card p-4 space-y-2 text-sm">
@@ -218,10 +279,16 @@ export function WorkerPayment({ worker, onClose }: { worker: Worker; onClose: ()
                 value={`- ${formatCurrency(attPay.absenceDeduction)}`} color="text-rose-deep"
               />
             )}
-            {applyAtt && attSettings.deductLate && (
+            {lateIncluded.length > 0 && (
               <Row
-                label={`Retards / départs anticipés (${fmtMin(attSum.lateMin + attSum.earlyMin)})`}
-                value={`- ${formatCurrency(attPay.lateDeduction)}`} color="text-rose-deep"
+                label={`Retards déduits (${lateIncluded.length} · ${fmtMin(lateIncludedMin)})`}
+                value={`- ${formatCurrency(lateIncludedTotal)}`} color="text-rose-deep"
+              />
+            )}
+            {otIncluded.length > 0 && (
+              <Row
+                label={`Heures sup. incluses (${otIncluded.length} · ${otIncluded.reduce((s, o) => s + o.hours, 0).toFixed(2)} h)`}
+                value={`+ ${formatCurrency(otIncludedTotal)}`} color="text-pistachio"
               />
             )}
             <div className="border-t border-gold/15 pt-2 flex justify-between font-bold">
@@ -386,6 +453,47 @@ function Row({ label, value, color = 'text-text-primary' }: { label: string; val
     <div className="flex justify-between">
       <span className="text-text-muted">{label}</span>
       <span className={`tabular ${color}`}>{value}</span>
+    </div>
+  );
+}
+
+interface PendingRow { id: string; on: boolean; date: string; detail: string; amount: string; tone: string }
+
+function PendingList({ title, icon, empty, hint, rows, onToggle, onAll, onExclude }: {
+  title: string; icon: React.ReactNode; empty: string; hint: string; rows: PendingRow[];
+  onToggle: (id: string, v: boolean) => void; onAll: (v: boolean) => void; onExclude: (id: string) => void;
+}) {
+  const allOn = rows.length > 0 && rows.every((r) => r.on);
+  return (
+    <div className="rounded-xl border border-gold/15 bg-vanilla/30 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-text-primary flex items-center gap-1.5">{icon}{title} ({rows.length})</p>
+        {rows.length > 0 && (
+          <Button size="sm" variant="ghost" onClick={() => onAll(!allOn)}>
+            {allOn ? 'Tout décocher' : 'Tout cocher'}
+          </Button>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-text-muted">{empty}</p>
+      ) : (
+        <>
+          <div className="max-h-56 overflow-y-auto divide-y divide-gold/10 rounded-lg border border-gold/10">
+            {rows.map((r) => (
+              <div key={r.id} className={`flex items-center gap-2 px-2 py-1.5 text-xs ${r.on ? '' : 'opacity-60'}`}>
+                <Checkbox checked={r.on} onChange={(v) => onToggle(r.id, v)} />
+                <span className="font-semibold text-text-primary whitespace-nowrap">{r.date}</span>
+                <span className="text-text-muted flex-1 truncate tabular">{r.detail}</span>
+                <span className={`tabular font-bold whitespace-nowrap ${r.tone}`}>{r.amount}</span>
+                <Button size="icon" variant="ghost" title="Exclure définitivement des calculs" onClick={() => onExclude(r.id)}>
+                  <EyeOff size={13} className="text-text-muted" />
+                </Button>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-text-muted">{hint} Décochées = restent en attente. <EyeOff size={10} className="inline" /> = exclure.</p>
+        </>
+      )}
     </div>
   );
 }
