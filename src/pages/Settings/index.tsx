@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
-import { Settings as SettingsIcon, UserCog, Database, Upload, Download, Save, AlertTriangle, ScrollText } from 'lucide-react';
+import { Settings as SettingsIcon, UserCog, Database, Upload, Download, Save, AlertTriangle, ScrollText, FileSpreadsheet, CheckSquare, Square } from 'lucide-react';
+import { BACKUP_SECTIONS, exportExcelBackup } from '@/lib/excelBackup';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Tabs } from '@/components/ui/Tabs';
 import { Card } from '@/components/ui/Card';
@@ -30,6 +31,26 @@ export default function SettingsPage() {
   const [form, setForm] = useState(settings);
   const [account, setAccount] = useState({ name: user?.name || '', username: user?.username || '', email: user?.email || '', oldPwd: '', newPwd: '', confirmPwd: '' });
   const fileRef = useRef<HTMLInputElement>(null);
+  // Sauvegarde Excel : toutes les parties sont cochées par défaut, à chaque fois.
+  const [xlsParts, setXlsParts] = useState<string[]>(() => BACKUP_SECTIONS.map((s) => s.id));
+  const [xlsBusy, setXlsBusy] = useState(false);
+  const allXls = xlsParts.length === BACKUP_SECTIONS.length;
+  const toggleXls = (id: string) =>
+    setXlsParts((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const handleExcelBackup = async () => {
+    if (xlsParts.length === 0) { toast.error('Sélectionnez au moins une partie'); return; }
+    setXlsBusy(true);
+    try {
+      const { sheets, failed } = await exportExcelBackup(xlsParts);
+      if (failed.length) toast.error(`Non relu(s) depuis la base : ${failed.join(', ')}`);
+      toast.success(`Sauvegarde Excel téléchargée (${sheets} feuille(s))`);
+    } catch (e) {
+      toast.error(`Échec de la sauvegarde Excel : ${(e as Error).message}`);
+    } finally {
+      setXlsBusy(false);
+    }
+  };
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -160,6 +181,52 @@ export default function SettingsPage() {
 
       {tab === 'database' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card index={0} className="md:col-span-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2 text-pistachio">
+                <FileSpreadsheet size={20} />
+                <h3 className="font-display font-semibold text-text-primary">Sauvegarde Excel</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setXlsParts(allXls ? [] : BACKUP_SECTIONS.map((s) => s.id))}
+                className="text-xs font-semibold text-gold-dark hover:underline"
+              >
+                {allXls ? 'Tout décocher' : 'Tout cocher'}
+              </button>
+            </div>
+            <p className="text-sm text-text-muted mb-4">
+              Exportez à tout moment les données de l'application dans un fichier Excel (.xlsx), une ou
+              plusieurs feuilles par partie. Toutes les parties sont sélectionnées par défaut.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
+              {BACKUP_SECTIONS.map((s) => {
+                const on = xlsParts.includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => toggleXls(s.id)}
+                    className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                      on ? 'border-pistachio/40 bg-pistachio/8' : 'border-gold/15 bg-vanilla/30 hover:bg-gold/5'
+                    }`}
+                  >
+                    {on ? <CheckSquare size={18} className="text-pistachio shrink-0 mt-0.5" /> : <Square size={18} className="text-text-muted shrink-0 mt-0.5" />}
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-text-primary">{s.label}</span>
+                      <span className="block text-[11px] text-text-muted">{s.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs text-text-muted">{xlsParts.length} / {BACKUP_SECTIONS.length} partie(s) sélectionnée(s)</span>
+              <Button variant="gold" onClick={handleExcelBackup} disabled={xlsBusy || xlsParts.length === 0}>
+                <FileSpreadsheet size={16} /> {xlsBusy ? 'Préparation…' : 'Télécharger la sauvegarde Excel'}
+              </Button>
+            </div>
+          </Card>
           <Card index={0}>
             <div className="flex items-center gap-2 mb-3 text-pistachio"><Download size={20} /><h3 className="font-display font-semibold text-text-primary">{t('backup')}</h3></div>
             <p className="text-sm text-text-muted mb-4">Exporter toutes les données en JSON</p>

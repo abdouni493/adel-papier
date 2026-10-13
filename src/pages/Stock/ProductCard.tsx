@@ -1,4 +1,4 @@
-import { Eye, Pencil, Trash2, User, Ruler, AlertTriangle, TrendingUp } from 'lucide-react';
+import { Eye, Pencil, Trash2, User, Ruler, AlertTriangle, TrendingUp, History } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -12,11 +12,12 @@ interface ProductCardProps {
   onView: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onHistory: () => void;
   canEdit: boolean;
   canDelete: boolean;
 }
 
-export function ProductCard({ product, index, onView, onEdit, onDelete, canEdit, canDelete }: ProductCardProps) {
+export function ProductCard({ product, index, onView, onEdit, onDelete, onHistory, canEdit, canDelete }: ProductCardProps) {
   const isLow = product.currentQuantity <= product.minAlertQuantity;
   const isOut = product.currentQuantity <= 0;
   const expDays = daysUntil(product.expirationDate ?? null);
@@ -119,6 +120,9 @@ export function ProductCard({ product, index, onView, onEdit, onDelete, canEdit,
       <div className="flex gap-2 mt-auto pt-2 border-t border-gold/10">
         <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={onView}>
           <Eye size={13} /> Détails
+        </Button>
+        <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={onHistory}>
+          <History size={13} /> Historique
         </Button>
         {canEdit && (
           <Button size="sm" variant="gold" className="flex-1 text-xs" onClick={onEdit}>

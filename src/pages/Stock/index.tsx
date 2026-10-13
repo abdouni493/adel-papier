@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  Package, Plus, Eye, Pencil, Trash2, AlertTriangle, Boxes, Coins, Ruler, RefreshCw,
+  Package, Plus, Eye, Pencil, Trash2, AlertTriangle, Boxes, Coins, Ruler, RefreshCw, History, Factory,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SearchBar } from '@/components/ui/SearchBar';
@@ -15,6 +15,9 @@ import { Badge } from '@/components/ui/Badge';
 import { StatCard } from '@/components/shared/StatCard';
 import { ProductForm } from '@/components/shared/ProductForm';
 import { ProductCard } from './ProductCard';
+import { ProductHistory, type HistoryTarget } from './ProductHistory';
+import { FicheTechnicView } from '@/components/shared/FicheTechnicView';
+import type { FicheTechnic } from '@/store/ficheTechnicStore';
 import { useStockStore } from '@/store/stockStore';
 import { useFicheTechnicStore } from '@/store/ficheTechnicStore';
 import { useLanguage } from '@/hooks/useLanguage';
@@ -47,6 +50,15 @@ export default function Stock() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [viewing, setViewing] = useState<Product | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryTarget | null>(null);
+  const [tab, setTab] = useState<'stock' | 'production'>('stock');
+  const [ficheViewing, setFicheViewing] = useState<FicheTechnic | null>(null);
+
+  const filteredFiches = useMemo(() => {
+    const s = search.toLowerCase();
+    return ficheTechnics.filter((f) =>
+      f.name.toLowerCase().includes(s) || (f.categoryName || '').toLowerCase().includes(s));
+  }, [ficheTechnics, search]);
 
   const filtered = useMemo(
     () =>
@@ -194,6 +206,63 @@ export default function Stock() {
         <StatCard label="Ruptures" value={stats.out} icon={<AlertTriangle size={22} />} index={3} accent="rose" />
       </div>
 
+      {/* Produits de stock / produits de production */}
+      <div className="flex flex-wrap gap-2">
+        <Button variant={tab === 'stock' ? 'gold' : 'secondary'} onClick={() => setTab('stock')}>
+          <Boxes size={16} /> Produits de stock ({products.length})
+        </Button>
+        <Button variant={tab === 'production' ? 'gold' : 'secondary'} onClick={() => setTab('production')}>
+          <Factory size={16} /> Produits de production ({ficheTechnics.length})
+        </Button>
+      </div>
+
+      {tab === 'production' ? (
+        <>
+          <SearchBar value={search} onChange={setSearch} placeholder="Rechercher un produit de production (nom / catégorie)…" />
+          {filteredFiches.length === 0 ? (
+            <EmptyState message="Aucune fiche technique" />
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-gold/15 bg-gradient-card shadow-card">
+              <table className="w-full text-sm">
+                <thead className="bg-vanilla/70 text-text-secondary border-b border-gold/15">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-semibold">Produit</th>
+                    <th className="text-left px-4 py-3 font-semibold">Catégorie</th>
+                    <th className="text-right px-4 py-3 font-semibold">Rendement</th>
+                    <th className="text-right px-4 py-3 font-semibold">Prix de vente</th>
+                    <th className="text-right px-4 py-3 font-semibold">Coût / unité</th>
+                    <th className="text-right px-4 py-3 font-semibold">Gain / unité</th>
+                    <th className="text-center px-4 py-3 font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredFiches.map((f) => (
+                    <tr key={f.id} className="border-t border-gold/10 hover:bg-gold/5 transition-colors">
+                      <td className="px-4 py-3 font-medium text-text-primary">
+                        <div className="flex items-center gap-2">
+                          {f.imageUrl && <img src={f.imageUrl} alt="" className="h-8 w-8 rounded-lg object-cover border border-gold/15" />}
+                          <span>{f.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">{f.categoryName ? <Badge variant="warning">{f.categoryName}</Badge> : '—'}</td>
+                      <td className="px-4 py-3 text-right tabular">{f.outputQuantity}{f.sellByUnit && f.sellUnit ? ` ${f.sellUnit}` : ''}</td>
+                      <td className="px-4 py-3 text-right tabular font-bold text-gold">{formatCurrency(f.unitPrice)}</td>
+                      <td className="px-4 py-3 text-right tabular text-text-secondary">{formatCurrency(f.costPerUnit)}</td>
+                      <td className="px-4 py-3 text-right tabular text-pistachio font-semibold">{formatCurrency(f.gainsPerUnit)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button size="sm" variant="secondary" className="text-xs" onClick={() => setFicheViewing(f)}><Eye size={14} /> Voir</Button>
+                          <Button size="sm" variant="secondary" className="text-xs" onClick={() => setHistory({ kind: 'fiche', fiche: f })}><History size={14} /> Historique</Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : (<>
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[220px]">
@@ -232,6 +301,7 @@ export default function Stock() {
               onView={() => setViewing(p)}
               onEdit={() => openEdit(p)}
               onDelete={() => setDeleteId(p.id)}
+              onHistory={() => setHistory({ kind: 'stock', product: p })}
               canEdit={can('stock', 'edit')}
               canDelete={can('stock', 'delete')}
             />
@@ -280,6 +350,7 @@ export default function Stock() {
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-1">
                         <Button size="icon" variant="ghost" onClick={() => setViewing(p)} title="Détails"><Eye size={16} /></Button>
+                        <Button size="icon" variant="ghost" onClick={() => setHistory({ kind: 'stock', product: p })} title="Historique du produit"><History size={16} className="text-lavender-deep" /></Button>
                         {can('stock', 'edit') && (
                           <Button size="icon" variant="ghost" onClick={() => openEdit(p)} title="Modifier"><Pencil size={16} /></Button>
                         )}
@@ -297,6 +368,7 @@ export default function Stock() {
           </table>
         </div>
       )}
+      </>)}
 
       {/* Create / Edit modal */}
       <Modal
@@ -336,11 +408,27 @@ export default function Stock() {
               <DetailRow label="Créé le" value={formatDate(viewing.createdAt, language)} />
               {viewing.createdBy && <DetailRow label="Créé par" value={viewing.createdBy} />}
             </div>
+            <Button variant="secondary" className="w-full" onClick={() => { setHistory({ kind: 'stock', product: viewing }); setViewing(null); }}>
+              <History size={16} /> Historique du produit
+            </Button>
             {can('stock', 'edit') && (
               <Button variant="gold" className="w-full" onClick={() => { openEdit(viewing); setViewing(null); }}>
                 <Pencil size={16} /> Modifier toutes les informations
               </Button>
             )}
+          </div>
+        )}
+      </Modal>
+
+      <ProductHistory target={history} onClose={() => setHistory(null)} />
+
+      <Modal open={!!ficheViewing} onClose={() => setFicheViewing(null)} title={ficheViewing?.name} size="md">
+        {ficheViewing && (
+          <div className="space-y-4">
+            <FicheTechnicView fiche={ficheViewing} />
+            <Button variant="gold" className="w-full" onClick={() => { setHistory({ kind: 'fiche', fiche: ficheViewing }); setFicheViewing(null); }}>
+              <History size={16} /> Voir l'historique du produit
+            </Button>
           </div>
         )}
       </Modal>
