@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Purchase, PurchaseReturn } from '@/types';
+import type { Purchase, PurchaseReturn, PurchaseExtraFee, PurchaseFeeCategory } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
 import { todayISO } from '@/lib/utils';
@@ -35,6 +35,29 @@ export interface UpdatePurchaseInput {
   products?: Purchase['products'];
 }
 
+/** TVA, frais et conversion euro d'une facture (tous facultatifs). */
+export interface PurchaseCostsInput {
+  tvaEnabled: boolean;
+  tvaRate: number;
+  customsFees: number;
+  transitFees: number;
+  extraFees: PurchaseExtraFee[];
+  euroAmount?: number | null;
+  exchangeRate?: number | null;
+}
+
+const costsPayload = (c: PurchaseCostsInput) => ({
+  tva_enabled: c.tvaEnabled,
+  tva_rate: Number(c.tvaRate) || 0,
+  customs_fees: Number(c.customsFees) || 0,
+  transit_fees: Number(c.transitFees) || 0,
+  euro_amount: c.euroAmount ? Number(c.euroAmount) : null,
+  exchange_rate: c.exchangeRate ? Number(c.exchangeRate) : null,
+  extra_fees: c.extraFees
+    .filter((f) => f.categoryName.trim() && Number(f.amount) > 0)
+    .map((f) => ({ category_id: f.categoryId ?? null, category_name: f.categoryName.trim(), amount: Number(f.amount) })),
+});
+
 /** Retour d'achat saisi : quantités rendues par ligne de la facture. */
 export interface PurchaseReturnInput {
   purchaseId: string;
@@ -46,6 +69,11 @@ export interface PurchaseReturnInput {
 interface PurchaseState {
   purchases: Purchase[];
   returns: PurchaseReturn[];
+  feeCategories: PurchaseFeeCategory[];
+  loadFeeCategories: () => Promise<void>;
+  addFeeCategory: (name: string) => Promise<PurchaseFeeCategory>;
+  /** Enregistre TVA / frais ; `paidAmount` présent => règlement refait sur le TTC. */
+  setCosts: (id: string, costs: PurchaseCostsInput, paidAmount?: number, date?: string) => Promise<void>;
   addReturn: (input: PurchaseReturnInput) => Promise<PurchaseReturn | undefined>;
   deleteReturn: (id: string) => Promise<void>;
   load: () => Promise<void>;
@@ -66,10 +94,42 @@ export const usePurchaseStore = create<PurchaseState>()((set, get) => {
   return {
     purchases: [],
     returns: [],
+    feeCategories: [],
+
+    loadFeeCategories: async () => {
+      set({ feeCategories: await db.purchaseFeeCategories.list().catch(() => []) });
+    },
+
+    addFeeCategory: async (name) => {
+      const existing = get().feeCategories.find((c) => c.name.toLowerCase() === name.trim().toLowerCase());
+      if (existing) return existing;
+      const cat = await save('purchases.feeCategory', () => db.purchaseFeeCategories.add(name.trim()));
+      set({ feeCategories: [...get().feeCategories, cat].sort((a, b) => a.name.localeCompare(b.name)) });
+      return cat;
+    },
+
+    setCosts: async (id, costs, paidAmount, date) => {
+      await save('purchases.costs', () =>
+        rpc.setPurchaseCosts(id, {
+          ...costsPayload(costs),
+          ...(paidAmount !== undefined ? { paid_amount: paidAmount, date: date ?? null } : {}),
+        })
+      );
+      const [purchases] = await Promise.all([
+        db.purchases.list(),
+        useCaisseStore.getState().load(),
+        get().loadFeeCategories(),
+      ]);
+      set({ purchases });
+    },
 
     load: async () => {
-      const [purchases, returns] = await Promise.all([db.purchases.list(), db.purchaseReturns.list()]);
-      set({ purchases, returns });
+      const [purchases, returns, feeCategories] = await Promise.all([
+        db.purchases.list(),
+        db.purchaseReturns.list(),
+        db.purchaseFeeCategories.list().catch(() => []),
+      ]);
+      set({ purchases, returns, feeCategories });
     },
 
     addReturn: async (input) => {

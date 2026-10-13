@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/Badge';
 import { useLanguage } from '@/hooks/useLanguage';
 import { useSalesStore } from '@/store/salesStore';
 import { usePurchaseStore } from '@/store/purchaseStore';
+import { summarizePurchaseFees, purchaseFeesTotal, purchaseGrandTotal } from '@/lib/purchaseCosts';
 import { useExpenseStore } from '@/store/expenseStore';
 import { useProductionStore } from '@/store/productionStore';
 import { useComptoirStore } from '@/store/comptoirStore';
@@ -743,6 +744,68 @@ export default function ReportsPage() {
       })),
       printTotalLabel: 'Total des achats',
       printTotalValue: money(sum(rPurchases.map((p) => p.totalAmount))),
+    });
+
+    // ---- 11 bis. TVA & FRAIS D'ACHAT (douane, transitaire, frais supplémentaires) ----
+    const feePurchases = purchases.filter((p) => inP(p.date) && (p.tvaEnabled || purchaseFeesTotal(p) > 0));
+    const fees = summarizePurchaseFees(feePurchases);
+    list.push({
+      key: 'purchaseFees', group: 'suppliers', label: "Frais d'achat", icon: <Receipt size={15} />,
+      note: 'TVA, frais de douane, transitaire et frais supplémentaires — totalisés par catégorie.',
+      count: feePurchases.length,
+      total: money(fees.total),
+      stats: [
+        { label: 'TVA sur achats', value: money(fees.tva) },
+        { label: 'Frais de douane', value: money(fees.customs) },
+        { label: 'Frais transitaire', value: money(fees.transit) },
+        { label: 'Frais supplémentaires', value: money(fees.extra) },
+        ...fees.byCategory.map((c) => ({ label: `Supp. — ${c.name}`, value: money(c.amount) })),
+        { label: 'Total des frais', value: money(fees.total), tone: 'neg' as const },
+      ],
+      columns: [
+        { label: 'Fournisseur' }, { label: 'N° facture' }, { label: 'Date' },
+        { label: 'TVA', align: 'right' }, { label: 'Douane', align: 'right' }, { label: 'Transitaire', align: 'right' },
+        { label: 'Frais supp.', align: 'right' }, { label: 'Coût final', align: 'right' },
+      ],
+      actions: feePurchases.map((p): EntryTarget => ({ kind: 'purchase', id: p.id })),
+      rows: feePurchases.map((p) => [
+        <span key="s" className="font-semibold">{nameOfSupplier(p.supplierId)}</span>,
+        p.reference, formatDate(p.date, language),
+        money(p.tvaAmount ?? 0), money(p.customsFees ?? 0), money(p.transitFees ?? 0),
+        <span key="x">
+          {money(p.extraFeesTotal ?? 0)}
+          {(p.extraFees ?? []).length > 0 && (
+            <span className="block text-[10px] text-text-muted">
+              {(p.extraFees ?? []).map((f) => `${f.categoryName} : ${money(f.amount)}`).join(' · ')}
+            </span>
+          )}
+        </span>,
+        <span key="g" className="font-bold">{money(purchaseGrandTotal(p))}</span>,
+      ]),
+      printColumns: [
+        DATE_COL, DESIGNATION_COL,
+        { label: 'TVA', align: 'right', width: '14%' },
+        { label: 'Frais', align: 'right', width: '16%' },
+        { label: 'Cout final', align: 'right', width: '18%' },
+      ],
+      printRows: [
+        ...feePurchases.map((p): DocRow => ({
+          cells: [
+            formatDate(p.date),
+            `${nameOfSupplier(p.supplierId).toUpperCase()} — FACTURE ${p.reference}` +
+              ((p.customsFees ?? 0) > 0 ? ` · Douane ${money(p.customsFees ?? 0)}` : '') +
+              ((p.transitFees ?? 0) > 0 ? ` · Transitaire ${money(p.transitFees ?? 0)}` : '') +
+              (p.extraFees ?? []).map((f) => ` · ${f.categoryName} ${money(f.amount)}`).join(''),
+            money(p.tvaAmount ?? 0), money(purchaseFeesTotal(p)), money(purchaseGrandTotal(p)),
+          ],
+        })),
+        ...fees.byCategory.map((c): DocRow => ({
+          variant: 'subtotal',
+          cells: ['', `TOTAL FRAIS SUPP. — ${c.name.toUpperCase()} (${c.count})`, '', money(c.amount), ''],
+        })),
+      ],
+      printTotalLabel: "Total des frais d'achat",
+      printTotalValue: money(fees.total),
     });
 
     // ---- 12. VERSEMENTS FOURNISSEURS ----

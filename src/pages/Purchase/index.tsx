@@ -14,6 +14,8 @@ import { ViewToggle } from '@/components/ui/ViewToggle';
 import { DataTable, useViewMode, type DataColumn } from '@/components/ui/DataTable';
 import type { ActionItem } from '@/components/ui/ActionMenu';
 import { CreatePurchase } from './CreatePurchase';
+import { PurchaseCostsDetails, StandaloneEuroConverter } from './PurchaseCosts';
+import { hasPurchaseCosts } from '@/lib/purchaseCosts';
 import { PurchaseReturnModal, printReturn } from './PurchaseReturnModal';
 import { PayDebtModal } from '@/components/shared/PayDebtModal';
 import { usePurchaseStore } from '@/store/purchaseStore';
@@ -173,6 +175,10 @@ export default function PurchasePage() {
           </div>
         )}
       />
+
+      <div className="mb-6">
+        <StandaloneEuroConverter />
+      </div>
 
       {/* Stats Cards Section */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 animate-fadeIn">
@@ -429,6 +435,7 @@ export default function PurchasePage() {
                 <tr key={i} className="border-t border-gold/10"><td className="px-3 py-2">{l.productName}{l.unitEnabled && l.unit ? <span className="text-xs text-gold-dark"> · {l.unit}</span> : null}</td><td className="px-3 py-2 text-right tabular">{l.quantity}{l.unitEnabled && l.unit ? ` ${l.unit}` : ''}</td><td className="px-3 py-2 text-right tabular">{formatCurrency(l.purchasePrice)}{l.unitEnabled && l.unit ? `/${l.unit}` : ''}</td><td className="px-3 py-2 text-right tabular">{formatCurrency(l.quantity * l.purchasePrice)}</td></tr>
               ))}</tbody>
             </table>
+            {hasPurchaseCosts(viewing) && <PurchaseCostsDetails purchase={viewing} />}
             {viewing.payments.length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-text-secondary mb-2">Paiements</h4>

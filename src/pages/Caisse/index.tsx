@@ -23,6 +23,7 @@ import { useSalesStore } from '@/store/salesStore';
 import { useCommandStore } from '@/store/commandStore';
 import { useClientStore } from '@/store/clientStore';
 import { usePurchaseStore } from '@/store/purchaseStore';
+import { PurchaseFeesSummaryCard } from '@/pages/Purchase/PurchaseCosts';
 import { useExpenseStore } from '@/store/expenseStore';
 import { useProductionStore } from '@/store/productionStore';
 import { useComptoirStore } from '@/store/comptoirStore';
@@ -293,7 +294,7 @@ export default function CaissePage() {
       productionValue, workerPayments, salaryPaid, overtimePaid, acomptesPaid,
       overtimeUnpaid, overtimeHoursUnpaid, depositsP, withdrawalsP,
       periodIn, periodOut, periodNet, productSales, restItems,
-      purchasesByCategory, periodProductions: pProd,
+      purchasesByCategory, periodProductions: pProd, periodPurchases: pPurch,
       depositCats, withdrawalCats,
       posSalesTotal, deliverySalesTotal, deliverySalesRest, deliveriesCount,
       salesDebt, commandsDebt, oldDebtsRest, clientDebtTotal, clientDebtAll, flow,
@@ -772,6 +773,11 @@ export default function CaissePage() {
             {c.purchasesByCategory.length === 0 && <EmptyState message={t('noData')} />}
           </div>
         </Card>
+      </div>
+
+      {/* ===== TVA & frais d'achat (douane, transitaire, frais supplémentaires) ===== */}
+      <div className="mb-6">
+        <PurchaseFeesSummaryCard purchases={c.periodPurchases} title="TVA & frais d'achat (période)" />
       </div>
 
       {/* ===== Breakdown + transaction history ===== */}

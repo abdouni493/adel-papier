@@ -13,6 +13,8 @@ import { usePurchaseStore } from '@/store/purchaseStore';
 import { formatCurrency, todayISO } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
 import type { PurchaseLine, Product, Purchase } from '@/types';
+import type { PurchaseCostsInput } from '@/store/purchaseStore';
+import { PurchaseCostsSection, emptyCosts, costsFromPurchase, computeCosts } from './PurchaseCosts';
 
 interface CreatePurchaseProps {
   onClose: () => void;
@@ -47,6 +49,10 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
   const { suppliers, addSupplier, applyCreditToPurchase, payDebt: paySupplier } = useSupplierStore();
   const addPurchase = usePurchaseStore((s) => s.addPurchase);
   const updatePurchase = usePurchaseStore((s) => s.updatePurchase);
+  const setCosts = usePurchaseStore((s) => s.setCosts);
+  const loadFeeCategories = usePurchaseStore((s) => s.loadFeeCategories);
+  const [costs, setCostsState] = useState<PurchaseCostsInput>(() => (editing ? costsFromPurchase(editing) : emptyCosts()));
+  useEffect(() => { loadFeeCategories(); }, [loadFeeCategories]);
 
   const isEdit = !!editing;
   /** Une facture rétroactive le reste quand on la corrige. */
@@ -99,10 +105,13 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
     );
   }, [editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const total = useMemo(
+  const totalHt = useMemo(
     () => lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.purchasePrice) || 0), 0),
     [lines]
   );
+  const costTotals = computeCosts(totalHt, costs);
+  /** Total dû au fournisseur : H.T + TVA (les frais sont payés à des tiers). */
+  const total = costTotals.ttc;
 
   /* ---- TROP-VERSE DU FOURNISSEUR -------------------------------------------
    * L'entreprise a déjà versé plus que ses factures : ce trop-versé paie la
@@ -197,6 +206,8 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
       }));
 
       if (editing) {
+        // TVA / frais d'abord : update_purchase() recalcule ensuite le TTC et le règlement.
+        await setCosts(editing.id, costs);
         await updatePurchase(editing.id, {
           supplierId,
           date,
@@ -227,6 +238,10 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
         products: payloadLines,
         paidAmount: cash,
       });
+      // TVA / frais : le règlement est refait sur le total TTC.
+      if (purchase?.id) {
+        await setCosts(purchase.id, costs, cash, date);
+      }
       if (creditUsed > 0.004 && purchase?.id) {
         try {
           const applied = await applyCreditToPurchase(purchase.id, creditUsed);
@@ -247,7 +262,7 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
           ? "Ancien achat enregistré — stock actuel inchangé, historique du fournisseur mis à jour"
           : 'Facture enregistrée — quantités du stock mises à jour'
       );
-      onCreated?.(purchase);
+      onCreated?.(usePurchaseStore.getState().purchases.find((x) => x.id === purchase.id) ?? purchase);
       onClose();
     } catch {
       /* the store already showed the error */
@@ -517,15 +532,23 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
         </div>
       </section>
 
-      {/* 3 — Paiement */}
+      {/* 3 — TVA, frais & devise */}
+      <PurchaseCostsSection totalHt={totalHt} value={costs} onChange={setCostsState} />
+
+      {/* 4 — Paiement */}
       <section className="bg-vanilla/30 rounded-2xl p-4 border border-gold/15">
         <h3 className="font-display font-semibold text-text-primary mb-3 flex items-center gap-2 text-sm">
-          <Wallet size={16} className="text-gold" /> 3. Paiement
+          <Wallet size={16} className="text-gold" /> 4. Paiement
         </h3>
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-[150px]">
-            <p className="text-xs text-text-muted">Total de la facture</p>
+            <p className="text-xs text-text-muted">{costs.tvaEnabled ? 'Total de la facture (T.T.C)' : 'Total de la facture'}</p>
             <p className="text-2xl font-bold text-gold-dark tabular">{formatCurrency(total)}</p>
+            {costTotals.fees > 0 && (
+              <p className="text-[11px] text-text-muted">
+                + frais {formatCurrency(costTotals.fees)} = coût final <b className="text-rose-deep">{formatCurrency(costTotals.grand)}</b>
+              </p>
+            )}
           </div>
           <Input
             label="Montant payé (DA)"

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from './supabase';
 import type {
-  Product, Marque, Category, Unit, Supplier, Client, ClientDebt, Sale, Purchase, PurchaseReturn,
+  Product, Marque, Category, Unit, Supplier, Client, ClientDebt, Sale, Purchase, PurchaseReturn, PurchaseFeeCategory,
   Production, ComptoirItem, Destruction, Worker, Role, Expense, CaisseTransaction,
   CaisseReport, StoreSettings, PartyPayment, CommandDelivery, WorkerOvertime, WorkerLate,
   PurchaseOrder, PaymentMethodDetails, PartyOldDebt, PartyCreditRefund, PartyType,
@@ -498,6 +498,18 @@ const toPurchase = (r: any): Purchase => ({
   payments: (r.purchase_payments ?? []).map((p: any) => ({
     id: p.id, date: p.date, amount: num(p.amount), description: p.description ?? '',
   })),
+  tvaEnabled: r.tva_enabled ?? false,
+  tvaRate: r.tva_rate != null ? num(r.tva_rate) : 19,
+  totalHt: r.total_ht != null && (num(r.total_ht) > 0 || r.tva_enabled) ? num(r.total_ht) : num(r.total_amount),
+  tvaAmount: num(r.tva_amount),
+  customsFees: num(r.customs_fees),
+  transitFees: num(r.transit_fees),
+  extraFeesTotal: num(r.extra_fees_total),
+  extraFees: (r.purchase_extra_fees ?? []).map((f: any) => ({
+    id: f.id, categoryId: f.category_id ?? undefined, categoryName: f.category_name, amount: num(f.amount),
+  })),
+  euroAmount: r.euro_amount != null ? num(r.euro_amount) : null,
+  exchangeRate: r.exchange_rate != null ? num(r.exchange_rate) : null,
 });
 
 const toPurchaseReturn = (r: any): PurchaseReturn => ({
@@ -884,9 +896,25 @@ export const db = {
 
   // /purchase
   purchases: {
-    list: async (): Promise<Purchase[]> =>
-      (await select<any>('purchases', '*, purchase_lines(*), purchase_payments(*)', 'date')).map(toPurchase),
+    list: async (): Promise<Purchase[]> => {
+      // purchase_extra_fees n'existe qu'après supabase/parts/12_achat_tva_frais.sql
+      try {
+        return (await select<any>('purchases', '*, purchase_lines(*), purchase_payments(*), purchase_extra_fees(*)', 'date')).map(toPurchase);
+      } catch {
+        return (await select<any>('purchases', '*, purchase_lines(*), purchase_payments(*)', 'date')).map(toPurchase);
+      }
+    },
     remove: (id: string) => remove('purchases', id),
+  },
+
+  // /purchase — catégories de frais supplémentaires
+  purchaseFeeCategories: {
+    list: async (): Promise<PurchaseFeeCategory[]> =>
+      (await selectOptional<any>('purchase_fee_categories', 'id, name', 'name')).map((r) => ({ id: r.id, name: r.name })),
+    add: async (name: string): Promise<PurchaseFeeCategory> => {
+      const r = await insert<any>('purchase_fee_categories', { name });
+      return { id: r.id, name: r.name };
+    },
   },
 
   // /purchase — retours d'achat
@@ -1183,6 +1211,8 @@ export const rpc = {
   /** Modifier l'en-tête d'une facture d'achat (date, bon, matricule, payé). */
   updatePurchase: (id: string, payload: Record<string, any>) =>
     call<any>('update_purchase', { p_id: id, p_payload: payload }),
+  setPurchaseCosts: (id: string, payload: Record<string, any>) =>
+    call<any>('set_purchase_costs', { p_id: id, p_payload: payload }),
   paySupplierDebt: (purchaseId: string, amount: number, date?: string) =>
     call<any>('pay_supplier_debt', { p_purchase_id: purchaseId, p_amount: amount, p_date: date ?? null }),
 

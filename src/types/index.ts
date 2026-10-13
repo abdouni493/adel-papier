@@ -123,6 +123,32 @@ export interface Purchase {
   allocatedAmount?: number;
   payments: Payment[];
   createdBy?: string;
+  /** TVA facultative : totalAmount = totalHt + tvaAmount (TTC dû au fournisseur). */
+  tvaEnabled?: boolean;
+  tvaRate?: number;
+  totalHt?: number;
+  tvaAmount?: number;
+  /** Frais payés à des tiers — hors dette fournisseur. */
+  customsFees?: number;
+  transitFees?: number;
+  extraFees?: PurchaseExtraFee[];
+  extraFeesTotal?: number;
+  /** Conversion euro → dinar (informative). */
+  euroAmount?: number | null;
+  exchangeRate?: number | null;
+}
+
+/** Frais supplémentaire d'un achat, rangé par catégorie. */
+export interface PurchaseExtraFee {
+  id?: string;
+  categoryId?: string;
+  categoryName: string;
+  amount: number;
+}
+
+export interface PurchaseFeeCategory {
+  id: string;
+  name: string;
 }
 
 /** Retour d'achat : marchandise rendue au fournisseur. */
