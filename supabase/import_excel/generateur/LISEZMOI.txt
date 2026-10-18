@@ -1,0 +1,6 @@
+Régénérer les fichiers SQL si SITUATION.xlsx change (Python 3 + openpyxl) :
+
+  cd supabase/import_excel/generateur
+  python generate.py "../../../SITUATION.xlsx" ".." "sql_setup.sql"
+  copy sql_rollback.sql ..\99_annulation_import.sql
+  python report.py ".."
