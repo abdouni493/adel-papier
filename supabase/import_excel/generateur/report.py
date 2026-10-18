@@ -29,7 +29,7 @@ rows = [
  ('5', '04_fournisseurs.sql', 'fournisseurs, factures d\'achat et règlements — feuille ACHAT'),
  ('6', '99_finalisation.sql', 'retire de la caisse les versements importés, renumérote les BL / factures importés par date, affiche le contrôle des soldes'),
  ('—', '05_optionnel_2019_TAZIRI_AL_SULTANE.sql', 'facultatif, voir plus bas'),
- ('—', '99_annulation_import.sql', "annule TOUT l'import (testé : la base revient exactement à son état d'avant)"),
+ ('—', 'annulation/ANNULER_TOUT_L_IMPORT.sql', "**à ne PAS exécuter pendant l'import** : supprime TOUT l'import (protégé, demande une confirmation dans le fichier)"),
 ]
 for a, b, c in rows: w(f'| {a} | `{b}` | {c} |')
 w('\n`IMPORT_COMPLET.sql` contient les fichiers 1 → 6 à la suite (1 Mo) si vous préférez un seul fichier '

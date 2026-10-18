@@ -8,6 +8,16 @@
 -- =============================================================================
 begin;
 
+-- ⚠ SÉCURITÉ : ce fichier SUPPRIME tout l'import. Il ne fait rien tant que la
+-- ligne ci-dessous n'est pas décommentée (retirez les deux tirets « -- »).
+-- set local import_excel.confirmer_annulation = 'OUI';
+
+do $$ begin
+  if coalesce(current_setting('import_excel.confirmer_annulation', true), '') <> 'OUI' then
+    raise exception 'Annulation NON effectuée : ce fichier supprime tout l''import. Pour confirmer, décommentez la ligne « set local import_excel.confirmer_annulation = ''OUI''; » en haut du fichier.';
+  end if;
+end $$;
+
 -- versements d'abord : leurs imputations sur les factures disparaissent avec eux
 delete from public.client_payments where id in (select row_id from import_excel.log where kind = 'client_payment');
 delete from public.supplier_payments where id in (select row_id from import_excel.log where kind = 'supplier_payment');

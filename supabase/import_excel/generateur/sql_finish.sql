@@ -9,6 +9,13 @@
 -- =============================================================================
 begin;
 
+-- garde-fou : ce fichier se lance APRÈS 00 → 04 dans la même base
+do $$ begin
+  if to_regclass('import_excel.log') is null then
+    raise exception 'Import non trouvé : le schéma import_excel n''existe pas dans cette base. Exécutez d''abord 00_preparation.sql, puis 01, 02 (parties 1 à 5), 03 et 04 — ou IMPORT_COMPLET.sql — avant 99_finalisation.sql.';
+  end if;
+end $$;
+
 do $$
 declare v_keep_caisse boolean := false; n int;
 begin

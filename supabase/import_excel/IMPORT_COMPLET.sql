@@ -29,7 +29,7 @@
 --  Les versements importés sont RETIRÉS de la caisse à la fin (99) : ce sont
 --  des encaissements des années passées, ils ne doivent pas gonfler la caisse.
 --
---  Tout ce qui est créé est noté dans import_excel.log → 99_annulation.sql
+--  Tout ce qui est créé est noté dans import_excel.log → annulation/ANNULER_TOUT_L_IMPORT.sql
 --  permet de tout retirer proprement.
 -- =============================================================================
 
@@ -7513,6 +7513,13 @@ commit;
 --  2. Affiche le contrôle : solde net de chaque client importé.
 -- =============================================================================
 begin;
+
+-- garde-fou : ce fichier se lance APRÈS 00 → 04 dans la même base
+do $$ begin
+  if to_regclass('import_excel.log') is null then
+    raise exception 'Import non trouvé : le schéma import_excel n''existe pas dans cette base. Exécutez d''abord 00_preparation.sql, puis 01, 02 (parties 1 à 5), 03 et 04 — ou IMPORT_COMPLET.sql — avant 99_finalisation.sql.';
+  end if;
+end $$;
 
 do $$
 declare v_keep_caisse boolean := false; n int;

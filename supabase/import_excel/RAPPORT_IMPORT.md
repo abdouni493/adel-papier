@@ -13,7 +13,7 @@ Généré à partir de `SITUATION.xlsx` (feuilles **Feuil1**, **Situation client
 | 5 | `04_fournisseurs.sql` | fournisseurs, factures d'achat et règlements — feuille ACHAT |
 | 6 | `99_finalisation.sql` | retire de la caisse les versements importés, renumérote les BL / factures importés par date, affiche le contrôle des soldes |
 | — | `05_optionnel_2019_TAZIRI_AL_SULTANE.sql` | facultatif, voir plus bas |
-| — | `99_annulation_import.sql` | annule TOUT l'import (testé : la base revient exactement à son état d'avant) |
+| — | `annulation/ANNULER_TOUT_L_IMPORT.sql` | **à ne PAS exécuter pendant l'import** : supprime TOUT l'import (protégé, demande une confirmation dans le fichier) |
 
 `IMPORT_COMPLET.sql` contient les fichiers 1 → 6 à la suite (1 Mo) si vous préférez un seul fichier (≈ 1 min 30 sur un PC ; si l'éditeur Supabase coupe, utilisez les fichiers séparés, chacun < 40 s). Chaque fichier est une transaction : en cas d'erreur rien n'est enregistré. Un fichier déjà exécuté est refusé s'il est relancé (pas de doublons).
 

@@ -27,7 +27,7 @@
 --  Les versements importés sont RETIRÉS de la caisse à la fin (99) : ce sont
 --  des encaissements des années passées, ils ne doivent pas gonfler la caisse.
 --
---  Tout ce qui est créé est noté dans import_excel.log → 99_annulation.sql
+--  Tout ce qui est créé est noté dans import_excel.log → annulation/ANNULER_TOUT_L_IMPORT.sql
 --  permet de tout retirer proprement.
 -- =============================================================================
 

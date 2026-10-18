@@ -6,6 +6,7 @@ from suppliers import parse_achat, purchase_lines
 
 XLSX, OUT, SETUP = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(OUT, exist_ok=True)
+os.makedirs(os.path.join(OUT, 'annulation'), exist_ok=True)
 
 strips = load(XLSX)
 for st in strips:
@@ -137,7 +138,7 @@ fin = open(os.path.join(os.path.dirname(SETUP), 'sql_finish.sql'), encoding='utf
 with open(os.path.join(OUT, '99_finalisation.sql'), 'w', encoding='utf-8', newline='\n') as f: f.write(fin)
 files.append('99_finalisation.sql')
 rb = open(os.path.join(os.path.dirname(SETUP), 'sql_rollback.sql'), encoding='utf-8').read()
-with open(os.path.join(OUT, '99_annulation_import.sql'), 'w', encoding='utf-8', newline='\n') as f: f.write(rb)
+with open(os.path.join(OUT, 'annulation', 'ANNULER_TOUT_L_IMPORT.sql'), 'w', encoding='utf-8', newline='\n') as f: f.write(rb)
 
 # ---------------------------------------------------------------- single file
 order = [f for f in files if not f.startswith('05_')]
