@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { FreeInvoice, FreeInvoiceDocType, FreeInvoiceLine } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
+import { stable } from '@/lib/stable';
 
 /** Saisie d'une facture non comptabilisée (création ou modification). */
 export interface FreeInvoiceInput {
@@ -69,7 +70,7 @@ interface FreeInvoiceState {
  * La base les garde pour pouvoir les réimprimer ou les corriger, mais elles ne
  * touchent ni au stock, ni à la caisse, ni à la dette du client, ni aux rapports.
  */
-export const useFreeInvoiceStore = create<FreeInvoiceState>()((set, get) => ({
+export const useFreeInvoiceStore = create<FreeInvoiceState>()(stable((set, get) => ({
   invoices: [],
 
   load: async () => {
@@ -89,4 +90,4 @@ export const useFreeInvoiceStore = create<FreeInvoiceState>()((set, get) => ({
     await save('freeInvoices.delete', () => db.freeInvoices.remove(id));
     set({ invoices: get().invoices.filter((x) => x.id !== id) });
   },
-}));
+})));

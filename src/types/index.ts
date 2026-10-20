@@ -242,6 +242,8 @@ export interface SaleLine {
   /** Lot lancé pour honorer cette ligne — lien vers l'écran Production. */
   productionId?: string;
   quantity: number;
+  /** Part de la ligne prise dans le stock prêt (caisse). */
+  fromReady?: number;
   sellingPrice: number;
   /** Catalogue price of the comptoir item at the moment of the sale. Lets the
    *  sale detail show "prix catalogue" vs "prix appliqué" when the cashier
@@ -370,6 +372,8 @@ export interface ComptoirItem {
   productName: string;
   description?: string;
   quantity: number;
+  /** Quantité posée au comptoir à l'origine. */
+  initialQuantity?: number;
   unitPrice: number;
   date: string;
   categoryId?: string;

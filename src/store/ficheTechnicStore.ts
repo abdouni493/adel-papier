@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Category, UsedProduct } from '@/types';
 import { db } from '@/lib/db';
 import { save } from '@/lib/persist';
+import { stable } from '@/lib/stable';
 
 export interface FicheTechnic {
   id: string;
@@ -71,7 +72,7 @@ interface FicheTechnicState {
   deleteCategory: (id: string) => Promise<void>;
 }
 
-export const useFicheTechnicStore = create<FicheTechnicState>()((set, get) => ({
+export const useFicheTechnicStore = create<FicheTechnicState>()(stable((set, get) => ({
   ficheTechnics: [],
   categories: [],
 
@@ -111,4 +112,4 @@ export const useFicheTechnicStore = create<FicheTechnicState>()((set, get) => ({
     await save('ficheCategories.delete', () => db.ficheCategories.remove(id));
     set({ categories: get().categories.filter((c) => c.id !== id) });
   },
-}));
+})));

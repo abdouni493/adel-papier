@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Product, Marque, Category, Unit } from '@/types';
 import { db } from '@/lib/db';
 import { save } from '@/lib/persist';
+import { stable } from '@/lib/stable';
 
 interface StockState {
   products: Product[];
@@ -30,7 +31,7 @@ interface StockState {
   deleteUnit: (id: string) => Promise<void>;
 }
 
-export const useStockStore = create<StockState>()((set, get) => ({
+export const useStockStore = create<StockState>()(stable((set, get) => ({
   products: [],
   marques: [],
   categories: [],
@@ -123,4 +124,4 @@ export const useStockStore = create<StockState>()((set, get) => ({
     await save('units.delete', () => db.units.remove(id));
     set({ units: get().units.filter((u) => u.id !== id) });
   },
-}));
+})));

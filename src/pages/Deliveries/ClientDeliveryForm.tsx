@@ -14,6 +14,7 @@ import { useFicheTechnicStore } from '@/store/ficheTechnicStore';
 import { useProductionStore } from '@/store/productionStore';
 import { useStockStore } from '@/store/stockStore';
 import { useSalesStore } from '@/store/salesStore';
+import { useComptoirStore } from '@/store/comptoirStore';
 import {
   readyByFiche, openLinesOfClient, allocateQuantity, ficheOfLine, recoveredOnLine,
   type AllocationPart,
@@ -83,6 +84,7 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
   const productions = useProductionStore((s) => s.productions);
   const products = useStockStore((s) => s.products);
   const sales = useSalesStore((s) => s.sales);
+  const comptoirItems = useComptoirStore((s) => s.items);
   const getOrCreatePassager = useClientStore((s) => s.getOrCreatePassager);
   const [newClientOpen, setNewClientOpen] = useState(false);
 
@@ -193,14 +195,14 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
 
   /** Stock prêt ; en modification, ce que le bon avait pris dans le stock y revient. */
   const readyMap = useMemo(() => {
-    const m = readyByFiche(productions, deliveries, recoveries);
+    const m = readyByFiche(productions, deliveries, recoveries, comptoirItems, sales);
     editing?.items.forEach((it) => {
       if (it.readyApplied && it.ficheTechnicId) {
         m.set(it.ficheTechnicId, r3((m.get(it.ficheTechnicId) ?? 0) + (it.fromReady ?? 0)));
       }
     });
     return m;
-  }, [productions, deliveries, recoveries, editing]);
+  }, [productions, deliveries, recoveries, comptoirItems, sales, editing]);
 
   const clientCommandsOpen = useMemo(
     () => new Set(openLines.map((l) => l.commandId)).size,

@@ -72,8 +72,8 @@ export default function Dashboard() {
   /* Suivi des commandes par produit : commandé, livré, reste à livrer et
      stock prêt — le reste baisse à chaque livraison. */
   const productStats = useMemo(
-    () => ficheOrderStats(ficheTechnics, commands, readyByFiche(productions, deliveries, recoveries)),
-    [ficheTechnics, commands, productions, deliveries, recoveries]
+    () => ficheOrderStats(ficheTechnics, commands, readyByFiche(productions, deliveries, recoveries, comptoirItems, sales)),
+    [ficheTechnics, commands, productions, deliveries, recoveries, comptoirItems, sales]
   );
 
   const [dismissed, setDismissed] = useState<string[]>([]);

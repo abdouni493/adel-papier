@@ -7,6 +7,7 @@ import { toast } from '@/components/ui/Toast';
 import { useComptoirStore } from './comptoirStore';
 import { useProductionStore } from './productionStore';
 import { useStockStore } from './stockStore';
+import { stable } from '@/lib/stable';
 
 export type AddSaleInput = Omit<
   Sale,
@@ -175,7 +176,7 @@ function warnIfFlagsMissing(saved: Sale | undefined, historical: boolean, tvaEna
   }
 }
 
-export const useSalesStore = create<SalesState>()((set, get) => ({
+export const useSalesStore = create<SalesState>()(stable((set, get) => ({
   sales: [],
 
   load: async () => set({ sales: await db.sales.list() }),
@@ -420,8 +421,13 @@ export const useSalesStore = create<SalesState>()((set, get) => ({
       const linked = useProductionStore
         .getState()
         .productions.filter((p) => p.saleId === row.id || fallbackMade.includes(p.id)).length;
+      // une ligne servie entièrement par le stock prêt ne lance aucun lot
+      const saved = sales.find((x) => x.id === row.id);
+      const expected = saved
+        ? saved.products.filter((l) => l.ficheTechnicId && l.quantity - (l.fromReady ?? 0) > 0.0005).length
+        : productions.length;
 
-      if (linked < productions.length) {
+      if (linked < expected) {
         const repaired = await trySave('sales.repairPosProductions', () =>
           rpc.repairPosSaleProductions({
             sale_id: row.id,
@@ -542,4 +548,4 @@ export const useSalesStore = create<SalesState>()((set, get) => ({
       ...(wasDelivery ? [refreshDeliveries(), useStockStore.getState().load()] : []),
     ]);
   },
-}));
+})));

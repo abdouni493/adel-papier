@@ -23,6 +23,8 @@ import { useCommandStore, type Command } from '@/store/commandStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useStockStore } from '@/store/stockStore';
 import { useFicheTechnicStore, type FicheTechnic } from '@/store/ficheTechnicStore';
+import { useProductionStore } from '@/store/productionStore';
+import { readyByFiche } from '@/lib/readyStock';
 import { useLanguage } from '@/hooks/useLanguage';
 import { formatCurrency, todayISO, computeTva, DEFAULT_TVA_RATE } from '@/lib/utils';
 import { printSaleInvoice, type InvoiceProductionDetail } from '@/lib/invoicePrint';
@@ -101,6 +103,10 @@ export default function POS() {
   const { t } = useLanguage();
   const items = useComptoirStore((s) => s.items);
   const products = useStockStore((s) => s.products);
+  const productionsAll = useProductionStore((s) => s.productions);
+  const deliveriesAll = useCommandStore((s) => s.deliveries);
+  const recoveriesAll = useCommandStore((s) => s.recoveries);
+  const salesAll = useSalesStore((s) => s.sales);
   const ficheTechnics = useFicheTechnicStore((s) => s.ficheTechnics);
   const {
     clients, addClient, updateClient, getOrCreatePassager,
@@ -240,6 +246,18 @@ export default function POS() {
   const change = Math.max(0, effectivePaid - dueNow);
   const rest = Math.max(0, dueNow - effectivePaid);
 
+  /** Stock prêt de chaque produit (comptoir compris). */
+  const readyMap = useMemo(
+    () => readyByFiche(productionsAll, deliveriesAll, recoveriesAll, items, salesAll),
+    [productionsAll, deliveriesAll, recoveriesAll, items, salesAll]
+  );
+  /** Article du comptoir : jamais au-delà du stock prêt de son produit. */
+  const comptoirAvailable = (item: ComptoirItem) => {
+    const prod = productionsAll.find((p) => p.id === item.productionId);
+    if (!prod || prod.origin === 'pos' || !prod.ficheTechnicId) return item.quantity;
+    return Math.max(0, Math.min(item.quantity, readyMap.get(prod.ficheTechnicId) ?? 0));
+  };
+
   /** Fiche lines resolved into the batches that will be produced on validation. */
   const plannedProductions = useMemo(
     () =>
@@ -247,11 +265,22 @@ export default function POS() {
         ? []
         : cart
             .filter((l): l is CartLine & { fiche: FicheTechnic } => l.kind === 'fiche' && !!l.fiche)
-            .map((l) => ({
-              line: l,
-              ingredients: scaleIngredients(l.fiche, l.quantity, products),
-            })),
-    [cart, products, historicalMode]
+            .reduce<{ line: CartLine & { fiche: FicheTechnic }; fromReady: number; toProduce: number;
+                       ingredients: ReturnType<typeof scaleIngredients>;
+                       fullIngredients: ReturnType<typeof scaleIngredients> }[]>((acc, l) => {
+              // le stock prêt sert d'abord ; seul le manquant est produit
+              const used = acc.filter((x) => x.line.refId === l.refId).reduce((s, x) => s + x.fromReady, 0);
+              const avail = Math.max(0, (readyMap.get(l.refId) ?? 0) - used);
+              const fromReady = Math.min(l.quantity, avail);
+              const toProduce = Math.round((l.quantity - fromReady) * 1000) / 1000;
+              acc.push({
+                line: l, fromReady, toProduce,
+                ingredients: toProduce > 0 ? scaleIngredients(l.fiche, toProduce, products) : [],
+                fullIngredients: scaleIngredients(l.fiche, l.quantity, products),
+              });
+              return acc;
+            }, []),
+    [cart, products, historicalMode, readyMap]
   );
 
   const productionCost = useMemo(
@@ -298,11 +327,15 @@ export default function POS() {
   const addComptoirToCart = (item: ComptoirItem) => {
     const existing = cart.find((c) => c.kind === 'comptoir' && c.refId === item.id);
     if (existing) {
-      if (!historicalMode && existing.quantity >= item.quantity) {
+      if (!historicalMode && existing.quantity >= comptoirAvailable(item)) {
         toast.warning('Stock comptoir insuffisant');
         return;
       }
       setCart(cart.map((c) => (c.key === existing.key ? { ...c, quantity: c.quantity + 1 } : c)));
+      return;
+    }
+    if (!historicalMode && comptoirAvailable(item) < 1) {
+      toast.warning('Stock prêt insuffisant : ce produit a déjà été livré ou vendu');
       return;
     }
     setCart([
@@ -315,7 +348,7 @@ export default function POS() {
         basePrice: item.unitPrice,
         unitPrice: item.unitPrice,
         quantity: 1,
-        available: historicalMode ? Infinity : item.quantity,
+        available: historicalMode ? Infinity : comptoirAvailable(item),
         sellByUnit: item.sellByUnit,
         unit: item.unit,
       },
@@ -427,7 +460,7 @@ export default function POS() {
     try {
       const saleClientId = clientId ?? (await getOrCreatePassager(t('walkInClient'))).id;
 
-      const productions: PosProductionInput[] = plannedProductions.map(({ line, ingredients }) => ({
+      const productions: PosProductionInput[] = plannedProductions.map(({ line, fullIngredients: ingredients }) => ({
         lineKey: line.key,
         ficheTechnicId: line.refId,
         name: line.productName,
@@ -451,11 +484,11 @@ export default function POS() {
 
       // snapshot the recipe details before the cart is emptied — the invoice
       // prints them under "détail des productions réalisées"
-      const invoiceProductions: InvoiceProductionDetail[] = plannedProductions.map(({ line, ingredients }) => ({
+      const invoiceProductions: InvoiceProductionDetail[] = plannedProductions.filter((p) => p.toProduce > 0).map(({ line, ingredients, toProduce }) => ({
         name: line.productName,
         categoryName: line.categoryName,
         date: new Date().toISOString(),
-        outputQuantity: line.quantity,
+        outputQuantity: toProduce,
         unit: line.unit,
         unitPrice: line.unitPrice,
         totalCost: ingredients.reduce((s, i) => s + (i.lineCost ?? 0), 0),
@@ -522,8 +555,10 @@ export default function POS() {
       toast.success(
         historicalMode
           ? 'Ancienne vente enregistrée — stock et comptoir inchangés, historique du client mis à jour'
-          : productions.length > 0
-            ? `Vente créée · ${productions.length} production(s) lancée(s)`
+          : invoiceProductions.length > 0
+            ? `Vente créée · ${invoiceProductions.length} production(s) lancée(s) pour le manquant`
+            : productions.length > 0
+              ? 'Vente créée · servie depuis le stock prêt'
             : savedSale.restAmount > 0 ? 'Vente créée (dette client)' : 'Vente créée et payée'
       );
       setPrintPrompt({
@@ -1115,7 +1150,9 @@ export default function POS() {
                 {missingStock.length > 0 ? <AlertTriangle size={13} /> : <Factory size={13} />}
                 {missingStock.length > 0
                   ? 'Matières premières insuffisantes'
-                  : `${ficheLines} production(s) seront lancées à la validation`}
+                  : plannedProductions.some((p) => p.toProduce > 0)
+                    ? `${plannedProductions.filter((p) => p.toProduce > 0).length} production(s) lancée(s) pour le manquant`
+                    : 'Servi entièrement depuis le stock prêt'}
               </p>
               {missingStock.length > 0 ? (
                 <ul className="mt-1 space-y-0.5">
@@ -1126,9 +1163,19 @@ export default function POS() {
                   ))}
                 </ul>
               ) : (
+                <>
+                <ul className="mt-1 space-y-0.5 text-text-secondary">
+                  {plannedProductions.map((p) => (
+                    <li key={p.line.key}>
+                      • {p.line.productName} : {p.fromReady} du stock prêt
+                      {p.toProduce > 0 ? ` · ${p.toProduce} à produire` : ''}
+                    </li>
+                  ))}
+                </ul>
                 <p className="mt-0.5 text-text-muted">
                   Coût matières estimé : <span className="font-bold">{formatCurrency(productionCost)}</span>
                 </p>
+                </>
               )}
             </div>
           )}

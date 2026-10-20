@@ -73,7 +73,7 @@ export interface SaleInvoiceData {
   /** Commande cliente à l'origine de la livraison facturée. */
   commandReference?: string;
   lines: InvoiceLine[];
-  /** Productions launched by this sale (point de vente). */
+  /** Productions launched by this sale — ignorées à l'impression (internes). */
   productions?: InvoiceProductionDetail[];
   total: number;
   reduction: number;
@@ -169,9 +169,8 @@ export function amountInWords(amount: number): string {
 
 /**
  * FACTURE DE VENTE — même papier à en-tête officiel que le bon de livraison.
- * La TVA n'est imprimée QUE si elle est activée sur la vente ; les productions
- * déclenchées par la facture (caisse « fiche technique ») sont détaillées dans
- * une seconde section, avec leurs matières consommées.
+ * La TVA n'est imprimée QUE si elle est activée sur la vente. Les productions
+ * déclenchées par la vente et leur coût ne sont JAMAIS imprimés (document client).
  */
 export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
   // numérotation annuelle : 1/2026, 2/2026 … puis 1/2027
@@ -230,37 +229,7 @@ export function printSaleInvoice(data: SaleInvoiceData, store: StoreSettings) {
     },
   ];
 
-  // Productions lancées par la vente — chaque lot et ses matières consommées.
-  (data.productions ?? []).forEach((p) => {
-    tables.push({
-      title: `Production : ${p.name}${p.categoryName ? ` (${p.categoryName})` : ''}`,
-      columns: [
-        { label: 'Matière consommée', align: 'left' },
-        { label: 'Dosage', align: 'center', width: '10%' },
-        { label: 'Quantité', align: 'center', width: '13%' },
-        { label: 'Coût unitaire', align: 'right', width: '17%' },
-        { label: 'Total', align: 'right', width: '18%' },
-      ],
-      rows: p.ingredients.map((i) => ({
-        cells: [
-          i.productName.toUpperCase(),
-          i.unit && i.unit.trim() ? i.unit : '/',
-          qty(i.quantityUsed),
-          formatCurrency(i.unitCost ?? 0),
-          formatCurrency(i.lineCost ?? i.quantityUsed * (i.unitCost ?? 0)),
-        ],
-      })),
-      totals: [
-        {
-          label: `Quantité produite : ${qty(p.outputQuantity)}${p.unit ? ` ${p.unit}` : ''}`,
-          value: formatCurrency(p.totalCost ?? 0),
-          strong: true,
-        },
-      ],
-      emptyLabel: 'Aucune matière détaillée',
-      note: p.date ? `Lot du ${formatDate(p.date)}${p.hour ? ` à ${p.hour}` : ''}` : undefined,
-    });
-  });
+  // Les productions (matières, coûts) sont internes : jamais imprimées pour le client.
 
   printOfficialDocument(
     {

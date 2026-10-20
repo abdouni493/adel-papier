@@ -14,6 +14,7 @@ import { useStockStore } from '@/store/stockStore';
 import { useCommandStore } from '@/store/commandStore';
 import { useProductionStore } from '@/store/productionStore';
 import { useSalesStore } from '@/store/salesStore';
+import { useComptoirStore } from '@/store/comptoirStore';
 import { lineTotal, deliveryPaymentSplit } from '@/lib/commandBilling';
 import { readyByFiche } from '@/lib/readyStock';
 import { toast } from '@/components/ui/Toast';
@@ -74,6 +75,7 @@ export function DeliveryModal({
   const allDeliveries = useCommandStore((s) => s.deliveries);
   const recoveries = useCommandStore((s) => s.recoveries);
   const sales = useSalesStore((s) => s.sales);
+  const comptoirItems = useComptoirStore((s) => s.items);
   /** Argent du compte du client qui payait le bon modifié : il lui revient avant d'être réimputé. */
   const editingSplit = useMemo(
     () => deliveryPaymentSplit(editing ? sales.find((s) => s.id === editing.saleId) : undefined),
@@ -201,7 +203,7 @@ export function DeliveryModal({
    * (Le calcul est refait — et appliqué — par la base de données.)
    */
   const readyPlan = useMemo(() => {
-    const ready = readyByFiche(productions, allDeliveries, recoveries);
+    const ready = readyByFiche(productions, allDeliveries, recoveries, comptoirItems, sales);
     // en modification, ce que le bon avait pris dans le stock prêt y revient
     editing?.items.forEach((it) => {
       if (it.readyApplied && it.ficheTechnicId) {
@@ -221,7 +223,7 @@ export function DeliveryModal({
         ready.set(fiche.id, avail - fromReady);
         return { row: r, ficheId: fiche.id, fromReady, toProduce: Math.round((r.now - fromReady) * 1000) / 1000 };
       });
-  }, [rows, productions, allDeliveries, recoveries, editing, ficheTechnics, isHistorical]);
+  }, [rows, productions, allDeliveries, recoveries, comptoirItems, sales, editing, ficheTechnics, isHistorical]);
 
   /** Matières premières de la part produite automatiquement. */
   const requirements = useMemo(() => {

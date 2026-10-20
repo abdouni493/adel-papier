@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useFicheTechnicStore } from './ficheTechnicStore';
 import { useClientStore } from './clientStore';
 import { useCommandStore } from './commandStore';
+import { stable } from '@/lib/stable';
 
 /* ============================================================================
  *  SITE WEB — côté application de gestion
@@ -164,7 +165,7 @@ interface WebsiteState {
   removeClientAccount: (clientId: string) => Promise<void>;
 }
 
-export const useWebsiteStore = create<WebsiteState>()((set, get) => ({
+export const useWebsiteStore = create<WebsiteState>()(stable((set, get) => ({
   settings: defaultSettings,
   texts: [],
   orders: [],
@@ -314,4 +315,4 @@ export const useWebsiteStore = create<WebsiteState>()((set, get) => ({
       clients: cs.clients.map((c) => (c.id === clientId ? { ...c, loginEmail: '' } : c)),
     });
   },
-}));
+})));

@@ -7,6 +7,7 @@ import { toast } from '@/components/ui/Toast';
 import { useStockStore } from './stockStore';
 import { useCaisseStore } from './caisseStore';
 import { ignoredEdits } from '@/lib/purchaseEdit';
+import { stable } from '@/lib/stable';
 
 export type AddPurchaseInput = Omit<
   Purchase,
@@ -85,7 +86,7 @@ interface PurchaseState {
   deletePurchase: (id: string) => Promise<void>;
 }
 
-export const usePurchaseStore = create<PurchaseState>()((set, get) => {
+export const usePurchaseStore = create<PurchaseState>()(stable((set, get) => {
   const payFn = async (purchaseId: string, amount: number, date?: string) => {
     await save('purchases.payDebt', () => rpc.paySupplierDebt(purchaseId, amount, date));
     set({ purchases: await db.purchases.list() });
@@ -284,4 +285,4 @@ export const usePurchaseStore = create<PurchaseState>()((set, get) => {
       set({ purchases: get().purchases.filter((p) => p.id !== id) });
     },
   };
-});
+}));

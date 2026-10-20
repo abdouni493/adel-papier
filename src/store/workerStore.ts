@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { db, rpc, remove as removeRow } from '@/lib/db';
 import { save, trySave } from '@/lib/persist';
 import { zkCommands, type AutoOvertime, type AutoLate } from '@/lib/attendance';
+import { stable } from '@/lib/stable';
 
 /** Envoie automatiquement l'employé à la pointeuse (file attendance_commands). */
 async function pushToDevice(commands: { command: string; label: string }[]) {
@@ -72,7 +73,7 @@ const overtimePayload = (d: Partial<WorkerOvertime>) => ({
   description: d.description ?? '',
 });
 
-export const useWorkerStore = create<WorkerState>()((set, get) => {
+export const useWorkerStore = create<WorkerState>()(stable((set, get) => {
   const reload = async () => set({ workers: await db.workers.list() });
 
   return {
@@ -307,4 +308,4 @@ export const useWorkerStore = create<WorkerState>()((set, get) => {
       await reload();
     },
   };
-});
+}));

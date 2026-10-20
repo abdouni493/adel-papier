@@ -3,6 +3,7 @@ import type { CaisseReport, CaisseReportType } from '@/types';
 import { todayISO, nowTime } from '@/lib/utils';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
+import { stable } from '@/lib/stable';
 
 interface CaisseReportState {
   reports: CaisseReport[];
@@ -18,7 +19,7 @@ interface CaisseReportState {
   deleteReport: (id: string) => Promise<void>;
 }
 
-export const useCaisseReportStore = create<CaisseReportState>()((set, get) => ({
+export const useCaisseReportStore = create<CaisseReportState>()(stable((set, get) => ({
   reports: [],
 
   load: async () => set({ reports: await db.caisseReports.list() }),
@@ -46,4 +47,4 @@ export const useCaisseReportStore = create<CaisseReportState>()((set, get) => ({
     await save('caisseReports.delete', () => db.caisseReports.remove(id));
     set({ reports: get().reports.filter((r) => r.id !== id) });
   },
-}));
+})));

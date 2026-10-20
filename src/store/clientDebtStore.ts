@@ -3,6 +3,7 @@ import type { ClientDebt } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
 import { useCaisseStore } from './caisseStore';
+import { stable } from '@/lib/stable';
 
 interface ClientDebtState {
   debts: ClientDebt[];
@@ -25,7 +26,7 @@ interface ClientDebtState {
   deleteVersement: (debtId: string, versementId: string) => Promise<void>;
 }
 
-export const useClientDebtStore = create<ClientDebtState>()((set, get) => ({
+export const useClientDebtStore = create<ClientDebtState>()(stable((set, get) => ({
   debts: [],
 
   load: async () => set({ debts: await db.clientDebts.list() }),
@@ -56,4 +57,4 @@ export const useClientDebtStore = create<ClientDebtState>()((set, get) => ({
     const [debts] = await Promise.all([db.clientDebts.list(), useCaisseStore.getState().load()]);
     set({ debts });
   },
-}));
+})));

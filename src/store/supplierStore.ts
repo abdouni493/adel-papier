@@ -6,6 +6,7 @@ import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
 import { usePurchaseStore } from './purchaseStore';
 import { useCaisseStore } from './caisseStore';
+import { stable } from '@/lib/stable';
 
 interface SupplierState {
   suppliers: Supplier[];
@@ -77,7 +78,7 @@ async function reloadLedger(): Promise<Pick<SupplierState, 'suppliers' | 'oldDeb
   return { suppliers, oldDebts, refunds };
 }
 
-export const useSupplierStore = create<SupplierState>()((set, get) => ({
+export const useSupplierStore = create<SupplierState>()(stable((set, get) => ({
   suppliers: [],
   payments: [],
   oldDebts: [],
@@ -199,4 +200,4 @@ export const useSupplierStore = create<SupplierState>()((set, get) => ({
     await refreshSupplierDebt();
     return Number(left) || 0;
   },
-}));
+})));

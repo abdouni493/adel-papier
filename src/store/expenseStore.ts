@@ -3,6 +3,7 @@ import type { Expense, Category, PurchaseOrder } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
 import { todayISO } from '@/lib/utils';
+import { stable } from '@/lib/stable';
 
 interface ExpenseState {
   expenses: Expense[];
@@ -33,7 +34,7 @@ const orderPayload = (d: Partial<PurchaseOrder>) => ({
   })),
 });
 
-export const useExpenseStore = create<ExpenseState>()((set, get) => ({
+export const useExpenseStore = create<ExpenseState>()(stable((set, get) => ({
   expenses: [],
   categories: [],
   orders: [],
@@ -93,4 +94,4 @@ export const useExpenseStore = create<ExpenseState>()((set, get) => ({
     await save('purchaseOrders.delete', () => db.purchaseOrders.remove(id));
     set({ orders: get().orders.filter((o) => o.id !== id) });
   },
-}));
+})));

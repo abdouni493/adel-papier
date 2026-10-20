@@ -1,4 +1,4 @@
-import type { Production, CommandDelivery, DeliveryRecovery } from '@/types';
+import type { Production, CommandDelivery, DeliveryRecovery, ComptoirItem, Sale } from '@/types';
 import type { Command } from '@/store/commandStore';
 import type { FicheTechnic } from '@/store/ficheTechnicStore';
 
@@ -10,10 +10,13 @@ import type { FicheTechnic } from '@/store/ficheTechnicStore';
  *  supabase/parts/07_livraisons_stock_pret.sql). Rien n'est écrit ici : ces
  *  calculs servent à AFFICHER, la base refait et applique tout elle-même.
  *
- *  STOCK PRÊT d'un produit (fiche technique) =
- *      productions du produit (hors caisse) − envoyé au comptoir
+ *  STOCK PRÊT d'un produit (fiche technique) — supabase/parts/13 =
+ *      productions du produit (hors caisse)
+ *    − sorti du comptoir (vendu / détruit) pour ces productions
  *    − quantités livrées depuis le stock prêt
  *    + quantités récupérées sur des bons de livraison
+ *    − quantités vendues en caisse depuis le stock prêt
+ *  « Mettre au comptoir » ne sort rien du stock prêt.
  *
  *  Une commande « en cours » est une commande ni annulée ni ancienne : c'est
  *  elle seule que l'écran Livraisons peut servir.
@@ -29,16 +32,28 @@ export const isOpenCommand = (c: Command) => c.status !== 'cancelled' && !c.isHi
 export function readyByFiche(
   productions: Production[],
   deliveries: CommandDelivery[],
-  recoveries: DeliveryRecovery[]
+  recoveries: DeliveryRecovery[],
+  comptoirItems: ComptoirItem[] = [],
+  sales: Sale[] = []
 ): Map<string, number> {
   const map = new Map<string, number>();
   const add = (id: string | undefined, q: number) => {
     if (!id) return;
     map.set(id, (map.get(id) ?? 0) + q);
   };
+  const ficheOfProduction = new Map<string, string>();
   productions.forEach((p) => {
     if (p.origin === 'pos') return;
-    add(p.ficheTechnicId, p.outputQuantity - (p.sentToComptoir ?? 0));
+    if (p.ficheTechnicId) ficheOfProduction.set(p.id, p.ficheTechnicId);
+    add(p.ficheTechnicId, p.outputQuantity);
+  });
+  comptoirItems.forEach((c) => {
+    const out = (c.initialQuantity ?? c.quantity) - Math.max(0, c.quantity);
+    if (out > 0) add(ficheOfProduction.get(c.productionId), -out);
+  });
+  sales.forEach((s) => {
+    if (s.isHistorical) return;
+    s.products.forEach((l) => { if (l.fromReady) add(l.ficheTechnicId, -l.fromReady); });
   });
   deliveries.forEach((d) =>
     d.items.forEach((it) => { if (it.readyApplied) add(it.ficheTechnicId, -it.quantity); })
@@ -47,6 +62,18 @@ export function readyByFiche(
     r.items.forEach((it) => { if (it.readyApplied) add(it.ficheTechnicId, it.quantity); })
   );
   map.forEach((v, k) => map.set(k, r3(v)));
+  return map;
+}
+
+/** Partie du stock prêt déjà posée au comptoir (non vendue), par produit. */
+export function onComptoirByFiche(productions: Production[], comptoirItems: ComptoirItem[]): Map<string, number> {
+  const fiche = new Map<string, string>();
+  productions.forEach((p) => { if (p.origin !== 'pos' && p.ficheTechnicId) fiche.set(p.id, p.ficheTechnicId); });
+  const map = new Map<string, number>();
+  comptoirItems.forEach((c) => {
+    const f = fiche.get(c.productionId);
+    if (f && c.quantity > 0) map.set(f, r3((map.get(f) ?? 0) + c.quantity));
+  });
   return map;
 }
 

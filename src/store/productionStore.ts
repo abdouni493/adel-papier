@@ -4,6 +4,7 @@ import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
 import { useStockStore } from './stockStore';
 import { useComptoirStore } from './comptoirStore';
+import { stable } from '@/lib/stable';
 
 export interface AddProductionInput {
   name: string;
@@ -38,7 +39,7 @@ interface ProductionState {
   deleteCategory: (id: string) => Promise<void>;
 }
 
-export const useProductionStore = create<ProductionState>()((set, get) => ({
+export const useProductionStore = create<ProductionState>()(stable((set, get) => ({
   productions: [],
   categories: [],
 
@@ -138,4 +139,4 @@ export const useProductionStore = create<ProductionState>()((set, get) => ({
     await save('productionCategories.delete', () => db.productionCategories.remove(id));
     set({ categories: get().categories.filter((c) => c.id !== id) });
   },
-}));
+})));

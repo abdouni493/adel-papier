@@ -9,6 +9,7 @@ import { recoveredByDelivery } from '@/lib/readyStock';
 import { useStockStore } from './stockStore';
 import { useSalesStore } from './salesStore';
 import { useProductionStore } from './productionStore';
+import { stable } from '@/lib/stable';
 
 export interface CommandItem {
   /** database id of the line — needed to attribute a delivery to it */
@@ -358,7 +359,7 @@ const reloadAccounts = async () => {
   }
 };
 
-export const useCommandStore = create<CommandState>()((set, get) => ({
+export const useCommandStore = create<CommandState>()(stable((set, get) => ({
   commands: [],
   deliveries: [],
   adjustments: [],
@@ -708,4 +709,4 @@ export const useCommandStore = create<CommandState>()((set, get) => ({
     ]);
     set({ commands, deliveries: withRecoveries(deliveries, recoveries), recoveries });
   },
-}));
+})));

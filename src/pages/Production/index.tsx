@@ -23,7 +23,9 @@ import { StatCard } from '@/components/shared/StatCard';
 import { useSettingsStore } from '@/store/settingsStore';
 import { printProductionSheet } from '@/lib/documents';
 import { uploadImage } from '@/lib/storage';
-import { readyByFiche } from '@/lib/readyStock';
+import { readyByFiche, onComptoirByFiche } from '@/lib/readyStock';
+import { useComptoirStore } from '@/store/comptoirStore';
+import { useSalesStore } from '@/store/salesStore';
 import { useCommandStore } from '@/store/commandStore';
 import { PriceListDialog } from './PriceListDialog';
 import { FicheTechnicView } from '@/components/shared/FicheTechnicView';
@@ -45,11 +47,14 @@ export default function ProductionPage() {
   const settings = useSettingsStore((s) => s.settings);
   const deliveries = useCommandStore((s) => s.deliveries);
   const recoveries = useCommandStore((s) => s.recoveries);
-  /** Stock prêt de chaque produit : produit fini pas encore livré ni mis au comptoir. */
+  const comptoirItems = useComptoirStore((s) => s.items);
+  const sales = useSalesStore((s) => s.sales);
+  /** Stock prêt de chaque produit : produit fini pas encore livré ni vendu (comptoir compris). */
   const readyMap = useMemo(
-    () => readyByFiche(productions, deliveries, recoveries),
-    [productions, deliveries, recoveries]
+    () => readyByFiche(productions, deliveries, recoveries, comptoirItems, sales),
+    [productions, deliveries, recoveries, comptoirItems, sales]
   );
+  const onComptoirMap = useMemo(() => onComptoirByFiche(productions, comptoirItems), [productions, comptoirItems]);
   const [priceListOpen, setPriceListOpen] = useState(false);
 
   /** Imprime la fiche complète d'une production (matières, résultat, gains). */
@@ -176,7 +181,8 @@ export default function ProductionPage() {
   const transferableOf = (p: Production) => {
     const rest = p.outputQuantity - (p.sentToComptoir ?? 0);
     if (p.origin === 'pos' || !p.ficheTechnicId) return Math.max(0, rest);
-    return Math.max(0, Math.min(rest, readyMap.get(p.ficheTechnicId) ?? 0));
+    const free = (readyMap.get(p.ficheTechnicId) ?? 0) - (onComptoirMap.get(p.ficheTechnicId) ?? 0);
+    return Math.max(0, Math.min(rest, free));
   };
 
   const productionActions = (p: Production): ActionItem[] => [
@@ -253,7 +259,7 @@ export default function ProductionPage() {
             <StatCard label="Valeur produite" value={prodStats.value} format="currency" icon={<Factory size={22} />} index={0} accent="gold" />
             <StatCard label="Coût des matières" value={prodStats.cost} format="currency" icon={<Coins size={22} />} index={1} accent="rose" />
             <StatCard label="Gains estimés" value={prodStats.gains} format="currency" icon={<TrendingUp size={22} />} index={2} accent="pistachio" />
-            <StatCard label="Stock prêt (non livré)" value={prodStats.remaining} icon={<PackageCheck size={22} />} index={3} accent="caramel" />
+            <StatCard label="Stock prêt (comptoir compris)" value={prodStats.remaining} icon={<PackageCheck size={22} />} index={3} accent="caramel" />
           </div>
 
           <div className="flex flex-wrap items-center gap-3 mb-6">

@@ -148,11 +148,13 @@ export default function App() {
   useEffect(() => {
     const onFocus = () => {
       if (!useAuthStore.getState().isAuthenticated) return;
+      // fenêtre cachée : inutile de tout relire (et de ralentir le poste)
+      if (document.visibilityState === 'hidden') return;
       void useAuthStore.getState().refreshProfile();
       void hydrateFromSupabase({ force: false });
     };
     window.addEventListener('focus', onFocus);
-    const timer = window.setInterval(onFocus, 120_000);
+    const timer = window.setInterval(onFocus, 300_000);
     return () => {
       window.removeEventListener('focus', onFocus);
       window.clearInterval(timer);

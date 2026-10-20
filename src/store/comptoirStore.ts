@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { ComptoirItem, Destruction } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
+import { stable } from '@/lib/stable';
 
 interface ComptoirState {
   items: ComptoirItem[];
@@ -13,7 +14,7 @@ interface ComptoirState {
   recoverDestructions: (destructionIds: string[]) => Promise<void>;
 }
 
-export const useComptoirStore = create<ComptoirState>()((set) => ({
+export const useComptoirStore = create<ComptoirState>()(stable((set) => ({
   items: [],
   destructions: [],
 
@@ -44,4 +45,4 @@ export const useComptoirStore = create<ComptoirState>()((set) => ({
     const [items, destructions] = await Promise.all([db.comptoir.list(), db.comptoir.destructions()]);
     set({ items, destructions });
   },
-}));
+})));

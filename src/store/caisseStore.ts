@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { CaisseTransaction, Category } from '@/types';
 import { db, rpc } from '@/lib/db';
 import { save } from '@/lib/persist';
+import { stable } from '@/lib/stable';
 
 interface CaisseState {
   transactions: CaisseTransaction[];
@@ -16,7 +17,7 @@ interface CaisseState {
   deleteCategory: (id: string) => Promise<void>;
 }
 
-export const useCaisseStore = create<CaisseState>()((set, get) => ({
+export const useCaisseStore = create<CaisseState>()(stable((set, get) => ({
   transactions: [],
   categories: [],
   initialBalance: 0,
@@ -63,4 +64,4 @@ export const useCaisseStore = create<CaisseState>()((set, get) => ({
     await save('caisseCategories.delete', () => db.caisseCategories.remove(id));
     set({ categories: get().categories.filter((c) => c.id !== id) });
   },
-}));
+})));

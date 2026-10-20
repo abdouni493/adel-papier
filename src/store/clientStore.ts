@@ -7,6 +7,7 @@ import { save } from '@/lib/persist';
 import { useSalesStore } from './salesStore';
 import { useCommandStore } from './commandStore';
 import { useCaisseStore } from './caisseStore';
+import { stable } from '@/lib/stable';
 
 interface ClientState {
   clients: Client[];
@@ -102,7 +103,7 @@ async function reloadLedger(): Promise<Pick<ClientState, 'clients' | 'oldDebts' 
   return { clients, oldDebts, refunds };
 }
 
-export const useClientStore = create<ClientState>()((set, get) => ({
+export const useClientStore = create<ClientState>()(stable((set, get) => ({
   clients: [],
   payments: [],
   oldDebts: [],
@@ -255,4 +256,4 @@ export const useClientStore = create<ClientState>()((set, get) => ({
     await refreshClientDebt();
     return Number(left) || 0;
   },
-}));
+})));
