@@ -17,8 +17,10 @@ import { useSalesStore } from '@/store/salesStore';
 import { useComptoirStore } from '@/store/comptoirStore';
 import {
   readyByFiche, openLinesOfClient, allocateQuantity, ficheOfLine, recoveredOnLine,
+  readyByFicheBox, readyVariantsOf, boxNames, boxKey,
   type AllocationPart,
 } from '@/lib/readyStock';
+import { BoxChoiceDialog, type BoxChoice, type BoxRequest } from '@/components/shared/BoxChoiceDialog';
 import { commandAdvanceAvailable, deliveryPaymentSplit } from '@/lib/commandBilling';
 import { stockRequirementsForDelivery } from '@/lib/ficheStock';
 import { formatCurrency, formatNumber, DEFAULT_TVA_RATE } from '@/lib/utils';
@@ -105,6 +107,9 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
   const [creditApplied, setCreditApplied] = useState(-1);
   const [cashPaid, setCashPaid] = useState(0);
   const [saving, setSaving] = useState(false);
+  /** Lignes pour lesquelles une boîte / une variante est demandée avant la création. */
+  const [boxRequests, setBoxRequests] = useState<BoxRequest[] | null>(null);
+  const [pendingInput, setPendingInput] = useState<ClientDeliveryInput | null>(null);
 
   const editingCommand = editing ? commands.find((c) => c.id === editing.commandId) : undefined;
 
@@ -114,6 +119,8 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
     setClientSearch('');
     setProductSearch('');
     setSaving(false);
+    setBoxRequests(null);
+    setPendingInput(null);
     if (editing) {
       const cmd = commands.find((c) => c.id === editing.commandId);
       const cli = clients.find((c) => c.id === cmd?.clientId) ?? null;
@@ -203,6 +210,20 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
     });
     return m;
   }, [productions, deliveries, recoveries, comptoirItems, sales, editing]);
+
+  /** Stock prêt par boîte ; en modification, la part prise par le bon y revient. */
+  const readyBoxMap = useMemo(() => {
+    const m = readyByFicheBox(productions, deliveries, recoveries, comptoirItems, sales);
+    editing?.items.forEach((it) => {
+      if (!it.readyApplied || !it.ficheTechnicId || !(it.fromReady ?? 0)) return;
+      const inner = m.get(it.ficheTechnicId) ?? new Map<string, number>();
+      const k = boxKey(it.readyBoxProductId);
+      inner.set(k, r3((inner.get(k) ?? 0) + (it.fromReady ?? 0)));
+      m.set(it.ficheTechnicId, inner);
+    });
+    return m;
+  }, [productions, deliveries, recoveries, comptoirItems, sales, editing]);
+  const namesOfBoxes = useMemo(() => boxNames(productions), [productions]);
 
   const clientCommandsOpen = useMemo(
     () => new Set(openLines.map((l) => l.commandId)).size,
@@ -393,6 +414,38 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
         sellByUnit: !!r.fiche?.sellByUnit, sellUnit: r.fiche?.sellByUnit ? r.fiche.sellUnit : undefined,
       })),
     };
+    // Avant la création : produit prêt dans plusieurs boîtes → laquelle livrer ;
+    // quantité à produire → dans quelle boîte du stock
+    const requests: BoxRequest[] = active
+      .map((r) => ({
+        key: r.ficheId,
+        productName: r.productName,
+        unit: r.unit,
+        ficheId: r.ficheId,
+        quantity: r3(r.quantity),
+        variants: readyVariantsOf(readyBoxMap, r.ficheId, namesOfBoxes),
+      }))
+      .filter((x) => x.variants.length > 1 || x.quantity > (x.variants[0]?.ready ?? 0) + 0.0005);
+    if (requests.length > 0) {
+      setPendingInput(input);
+      setBoxRequests(requests);
+      return;
+    }
+    await submit(input);
+  };
+
+  const submitWithBoxes = async (choices: Record<string, BoxChoice>) => {
+    if (!pendingInput) return;
+    const boxes: NonNullable<ClientDeliveryInput['boxes']> = {};
+    Object.entries(choices).forEach(([ficheId, c]) => {
+      boxes[ficheId] = { readyBoxId: c.readyBoxId, boxProductId: c.boxProductId, boxQuantity: c.boxQuantity };
+    });
+    await submit({ ...pendingInput, boxes });
+    setBoxRequests(null);
+    setPendingInput(null);
+  };
+
+  const submit = async (input: ClientDeliveryInput) => {
     setSaving(true);
     try {
       if (editing) {
@@ -861,6 +914,16 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
         open={newClientOpen}
         onClose={() => setNewClientOpen(false)}
         onCreated={(c) => { setClient(c); setClientSearch(''); setLines([]); setTvaTouched(false); }}
+      />
+      <BoxChoiceDialog
+        open={!!boxRequests}
+        title="Boîtes de la livraison"
+        intro="Choisissez la boîte du stock prêt à livrer et, pour la quantité qui sera produite, la boîte du stock (déduite automatiquement)."
+        requests={boxRequests ?? []}
+        confirmLabel={editing ? 'Enregistrer la livraison' : 'Créer la livraison'}
+        busy={saving}
+        onCancel={() => { setBoxRequests(null); setPendingInput(null); }}
+        onConfirm={submitWithBoxes}
       />
     </Modal>
   );

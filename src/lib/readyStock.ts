@@ -285,3 +285,89 @@ export function recoveredOnLine(recoveries: DeliveryRecovery[], deliveryId: stri
       )
   );
 }
+
+/* ------------------------------------------------------------------ boîtes */
+
+/** Clé d'une variante du stock prêt : identifiant de la boîte, '' = sans boîte. */
+export const boxKey = (id?: string | null) => id || '';
+
+/**
+ * Stock prêt de chaque produit PAR BOÎTE — miroir de
+ * `fiche_ready_box_quantity()` (supabase/parts/14_boites.sql).
+ * fiche → (boîte → quantité). La somme des boîtes d'un produit est son stock
+ * prêt total (`readyByFiche`).
+ */
+export function readyByFicheBox(
+  productions: Production[],
+  deliveries: CommandDelivery[],
+  recoveries: DeliveryRecovery[],
+  comptoirItems: ComptoirItem[] = [],
+  sales: Sale[] = []
+): Map<string, Map<string, number>> {
+  const map = new Map<string, Map<string, number>>();
+  const add = (fiche: string | undefined, box: string | undefined, q: number) => {
+    if (!fiche) return;
+    const inner = map.get(fiche) ?? new Map<string, number>();
+    const k = boxKey(box);
+    inner.set(k, (inner.get(k) ?? 0) + q);
+    map.set(fiche, inner);
+  };
+  const prodById = new Map<string, Production>();
+  productions.forEach((p) => {
+    if (p.origin === 'pos') return;
+    prodById.set(p.id, p);
+    add(p.ficheTechnicId, p.boxProductId, p.outputQuantity);
+  });
+  comptoirItems.forEach((c) => {
+    const p = prodById.get(c.productionId);
+    const out = (c.initialQuantity ?? c.quantity) - Math.max(0, c.quantity);
+    if (p && out > 0) add(p.ficheTechnicId, p.boxProductId, -out);
+  });
+  sales.forEach((s) => {
+    if (s.isHistorical) return;
+    s.products.forEach((l) => { if (l.fromReady) add(l.ficheTechnicId, l.readyBoxProductId, -l.fromReady); });
+  });
+  deliveries.forEach((d) =>
+    d.items.forEach((it) => {
+      if (!it.readyApplied) return;
+      const from = it.fromReady ?? 0;
+      add(it.ficheTechnicId, it.readyBoxProductId, -from);
+      add(it.ficheTechnicId, it.producedBoxProductId, -(it.quantity - from));
+    })
+  );
+  recoveries.forEach((r) =>
+    r.items.forEach((it) => { if (it.readyApplied) add(it.ficheTechnicId, it.boxProductId, it.quantity); })
+  );
+  map.forEach((inner) => inner.forEach((v, k) => inner.set(k, r3(v))));
+  return map;
+}
+
+/** Une variante (boîte) du stock prêt d'un produit. */
+export interface ReadyVariant {
+  /** Identifiant de la boîte, '' = sans boîte. */
+  boxId: string;
+  boxName: string;
+  ready: number;
+}
+
+/** Nom lisible de chaque boîte, depuis les productions (même boîte supprimée du stock). */
+export function boxNames(productions: Production[]): Map<string, string> {
+  const m = new Map<string, string>();
+  productions.forEach((p) => { if (p.boxProductId && p.boxProductName) m.set(p.boxProductId, p.boxProductName); });
+  return m;
+}
+
+/** Variantes d'un produit qui ont du stock prêt, la plus fournie d'abord. */
+export function readyVariantsOf(
+  byBox: Map<string, Map<string, number>>,
+  ficheId: string | undefined,
+  names: Map<string, string>
+): ReadyVariant[] {
+  if (!ficheId) return [];
+  const inner = byBox.get(ficheId);
+  if (!inner) return [];
+  return [...inner.entries()]
+    .filter(([, v]) => v > 0.0005)
+    .map(([k, v]) => ({ boxId: k, boxName: k ? names.get(k) ?? 'Boîte' : 'Sans boîte', ready: v }))
+    .sort((a, b) => b.ready - a.ready);
+}

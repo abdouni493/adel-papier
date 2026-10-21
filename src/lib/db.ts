@@ -140,6 +140,7 @@ const toProduct = (r: any): Product => ({
   unit: r.unit ?? undefined,
   expirationEnabled: r.expiration_enabled ?? false,
   expirationDate: r.expiration_date ?? null,
+  isBox: r.is_box ?? false,
   createdAt: (r.created_at ?? '').slice(0, 10),
   createdBy: r.created_by ?? undefined,
 });
@@ -160,6 +161,7 @@ const fromProduct = (p: Partial<Product>) => {
   if (p.unit !== undefined) row.unit = p.unit || null;
   if (p.expirationEnabled !== undefined) row.expiration_enabled = p.expirationEnabled ?? false;
   if (p.expirationDate !== undefined) row.expiration_date = p.expirationDate || null;
+  if (p.isBox !== undefined) row.is_box = !!p.isBox;
   return row;
 };
 
@@ -337,6 +339,8 @@ const toCommandDelivery = (r: any): CommandDelivery => ({
     readyApplied: i.ready_applied ?? false,
     fromReady: num(i.from_ready),
     producedQuantity: num(i.produced_quantity),
+    readyBoxProductId: i.ready_box_product_id ?? undefined,
+    producedBoxProductId: i.produced_box_product_id ?? undefined,
     unitCost: num(i.unit_cost),
     costAmount: num(i.cost_amount),
   })),
@@ -387,6 +391,7 @@ const toDeliveryRecovery = (r: any): DeliveryRecovery => ({
     amount: num(i.amount),
     unit: i.unit ?? undefined,
     readyApplied: i.ready_applied ?? true,
+    boxProductId: i.box_product_id ?? undefined,
     unitCost: num(i.unit_cost),
     costAmount: num(i.cost_amount),
   })),
@@ -565,6 +570,7 @@ const toSale = (r: any): Sale => ({
     productionId: l.production_id ?? undefined,
     quantity: num(l.quantity),
     fromReady: num(l.from_ready),
+    readyBoxProductId: l.ready_box_product_id ?? undefined,
     sellingPrice: num(l.selling_price),
     basePrice: l.base_price === null || l.base_price === undefined ? undefined : num(l.base_price),
     sellByUnit: l.sell_by_unit ?? false,
@@ -601,6 +607,9 @@ const toProduction = (r: any): Production => ({
   deliveryId: r.delivery_id ?? undefined,
   saleId: r.sale_id ?? undefined,
   saleReference: r.sale_reference ?? undefined,
+  boxProductId: r.box_product_id ?? undefined,
+  boxProductName: r.box_product_name ?? undefined,
+  boxQuantity: num(r.box_quantity),
   createdBy: r.created_by ?? undefined,
   usedProducts: (r.production_used_products ?? []).map((u: any) => ({
     productId: u.product_id ?? '',
@@ -610,6 +619,7 @@ const toProduction = (r: any): Production => ({
     unit: u.unit ?? undefined,
     unitCost: num(u.unit_cost),
     lineCost: num(u.line_cost),
+    isBox: u.is_box ?? false,
   })),
 });
 
@@ -1438,9 +1448,9 @@ export const rpc = {
 
   // /livraisons — client → produit → quantité (un bon par commande touchée)
   createClientDelivery: (payload: Record<string, any>) =>
-    call<any[]>('create_client_delivery', { p_payload: payload }),
+    call<any[]>('create_client_delivery_boxes', { p_payload: payload }),
   updateClientDelivery: (id: string, payload: Record<string, any>) =>
-    call<any>('update_client_delivery', { p_id: id, p_payload: payload }),
+    call<any>('update_client_delivery_boxes', { p_id: id, p_payload: payload }),
   /** Récupère la marchandise d'un bon : stock prêt, facture et argent du client. */
   createDeliveryRecovery: (payload: Record<string, any>) =>
     call<any>('create_delivery_recovery', { p_payload: payload }),

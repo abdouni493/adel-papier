@@ -39,6 +39,12 @@ export interface PosProductionInput {
   sellByUnit?: boolean;
   sellUnit?: string;
   usedProducts: UsedProduct[];
+  /** Variante (boîte) du stock prêt où prendre la ligne ('' = sans boîte) —
+   *  absente : la base prend la variante la plus fournie. */
+  readyBoxId?: string;
+  /** Boîte du stock pour la quantité produite, et nombre de boîtes. */
+  boxProductId?: string;
+  boxQuantity?: number;
 }
 
 export type PosSaleLine = SaleLine & { lineKey?: string };
@@ -67,6 +73,9 @@ const productionPayload = (pr: PosProductionInput, hour?: string) => ({
   sell_unit: pr.sellUnit ?? null,
   hour: hour ?? null,
   used_products: pr.usedProducts.map(usedProductPayload),
+  ...(pr.readyBoxId === undefined ? {} : { ready_box_product_id: pr.readyBoxId }),
+  box_product_id: pr.boxProductId || null,
+  box_quantity: pr.boxProductId ? pr.boxQuantity ?? 0 : 0,
 });
 
 export interface AddPosSaleInput {

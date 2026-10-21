@@ -24,7 +24,8 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { useStockStore } from '@/store/stockStore';
 import { useFicheTechnicStore, type FicheTechnic } from '@/store/ficheTechnicStore';
 import { useProductionStore } from '@/store/productionStore';
-import { readyByFiche } from '@/lib/readyStock';
+import { readyByFiche, readyByFicheBox, readyVariantsOf, boxNames } from '@/lib/readyStock';
+import { BoxChoiceDialog, type BoxChoice, type BoxRequest } from '@/components/shared/BoxChoiceDialog';
 import { useLanguage } from '@/hooks/useLanguage';
 import { formatCurrency, todayISO, computeTva, DEFAULT_TVA_RATE } from '@/lib/utils';
 import { printSaleInvoice, type InvoiceProductionDetail } from '@/lib/invoicePrint';
@@ -173,6 +174,8 @@ export default function POS() {
   const [ficheModal, setFicheModal] = useState<FicheTechnic | null>(null);
   /** Fiche line of the cart whose recipe is being inspected. */
   const [recipeLine, setRecipeLine] = useState<CartLine | null>(null);
+  /** Lignes pour lesquelles une boîte / une variante est demandée avant la vente. */
+  const [boxRequests, setBoxRequests] = useState<BoxRequest[] | null>(null);
 
   const selectedClient = clients.find((c) => c.id === clientId) ?? null;
 
@@ -251,6 +254,12 @@ export default function POS() {
     () => readyByFiche(productionsAll, deliveriesAll, recoveriesAll, items, salesAll),
     [productionsAll, deliveriesAll, recoveriesAll, items, salesAll]
   );
+  /** Stock prêt par boîte (variante) de chaque produit. */
+  const readyBoxMap = useMemo(
+    () => readyByFicheBox(productionsAll, deliveriesAll, recoveriesAll, items, salesAll),
+    [productionsAll, deliveriesAll, recoveriesAll, items, salesAll]
+  );
+  const namesOfBoxes = useMemo(() => boxNames(productionsAll), [productionsAll]);
   /** Article du comptoir : jamais au-delà du stock prêt de son produit. */
   const comptoirAvailable = (item: ComptoirItem) => {
     const prod = productionsAll.find((p) => p.id === item.productionId);
@@ -434,7 +443,23 @@ export default function POS() {
   };
 
   // ---------------------------------------------------------------- create --
-  const createSale = async () => {
+  /**
+   * Avant la vente : un produit prêt dans plusieurs boîtes → laquelle vendre ;
+   * une quantité à produire → dans quelle boîte du stock.
+   */
+  const boxRequestsOfCart = (): BoxRequest[] =>
+    plannedProductions
+      .map(({ line }) => ({
+        key: line.key,
+        productName: line.productName,
+        unit: line.sellByUnit ? line.unit : undefined,
+        ficheId: line.refId,
+        quantity: line.quantity,
+        variants: readyVariantsOf(readyBoxMap, line.refId, namesOfBoxes),
+      }))
+      .filter((x) => x.variants.length > 1 || x.quantity > (x.variants[0]?.ready ?? 0) + 0.0005);
+
+  const createSale = async (boxChoices?: Record<string, BoxChoice>) => {
     if (cart.length === 0) { toast.error('Panier vide'); return; }
     if (cart.some((c) => c.quantity <= 0)) { toast.error('Une ligne a une quantité nulle'); return; }
     if (rest > 0 && !clientId) { toast.error('Sélectionnez un client pour une vente à crédit'); return; }
@@ -456,6 +481,11 @@ export default function POS() {
       toast.error('Stock de matières premières insuffisant pour lancer la production');
       return;
     }
+    if (!historicalMode && !boxChoices) {
+      const requests = boxRequestsOfCart();
+      if (requests.length > 0) { setBoxRequests(requests); return; }
+    }
+    setBoxRequests(null);
     setSaving(true);
     try {
       const saleClientId = clientId ?? (await getOrCreatePassager(t('walkInClient'))).id;
@@ -480,6 +510,9 @@ export default function POS() {
           unitCost: i.unitCost,
           lineCost: i.lineCost,
         })),
+        readyBoxId: boxChoices?.[line.key]?.readyBoxId,
+        boxProductId: boxChoices?.[line.key]?.boxProductId || undefined,
+        boxQuantity: boxChoices?.[line.key]?.boxQuantity,
       }));
 
       // snapshot the recipe details before the cart is emptied — the invoice
@@ -1419,7 +1452,7 @@ export default function POS() {
                 <Button
                   variant={historicalMode ? 'rose' : rest <= 0 ? 'gold' : 'rose'}
                   className="w-full h-12 text-base"
-                  onClick={createSale}
+                  onClick={() => createSale()}
                   disabled={
                     saving ||
                     cart.length === 0 ||
@@ -1623,6 +1656,17 @@ export default function POS() {
       </Modal>
 
       {/* ---- Print prompt after a successful sale ---- */}
+      <BoxChoiceDialog
+        open={!!boxRequests}
+        title="Boîtes de la vente"
+        intro="Choisissez la boîte du stock prêt à vendre et, pour la quantité qui sera produite, la boîte du stock (déduite automatiquement)."
+        requests={boxRequests ?? []}
+        confirmLabel="Valider la vente"
+        busy={saving}
+        onCancel={() => setBoxRequests(null)}
+        onConfirm={(choices) => createSale(choices)}
+      />
+
       <Modal open={!!printPrompt} onClose={() => setPrintPrompt(null)} size="sm">
         <div className="flex flex-col items-center text-center py-2">
           <div className="h-14 w-14 rounded-full bg-pistachio/15 flex items-center justify-center mb-4">

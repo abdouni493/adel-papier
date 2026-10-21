@@ -45,6 +45,9 @@ export interface Product {
   unit?: string;
   expirationEnabled: boolean;
   expirationDate: string | null;
+  /** Boîte (emballage) : proposée à la production, la livraison et la caisse
+   *  pour conditionner le produit fini ; elle sort du stock comme une matière. */
+  isBox?: boolean;
   createdAt: string;
   createdBy?: string;
 }
@@ -244,6 +247,8 @@ export interface SaleLine {
   quantity: number;
   /** Part de la ligne prise dans le stock prêt (caisse). */
   fromReady?: number;
+  /** Boîte (variante du stock prêt) de la part `fromReady` — vide = sans boîte. */
+  readyBoxProductId?: string;
   sellingPrice: number;
   /** Catalogue price of the comptoir item at the moment of the sale. Lets the
    *  sale detail show "prix catalogue" vs "prix appliqué" when the cashier
@@ -322,6 +327,7 @@ export interface UsedProduct {
   unit?: string;       // ingredient unit when it is a detail/unit product
   unitCost?: number;   // ingredient purchase price (per unit/piece)
   lineCost?: number;   // quantityUsed * unitCost
+  isBox?: boolean;     // the packaging box of the batch (added by the database)
 }
 
 export interface Production {
@@ -363,6 +369,12 @@ export interface Production {
   lossQuantity?: number;     // expectedQuantity - outputQuantity
   lossDescription?: string;  // why the loss happened
   lossValue?: number;        // money value of the lost quantity (raw-material cost)
+  // ---------- Boîte (emballage) ----------
+  // Produit du stock marqué « boîte » dans lequel le lot est conditionné ;
+  // sa quantité sort du stock avec les matières (ligne isBox de usedProducts).
+  boxProductId?: string;
+  boxProductName?: string;
+  boxQuantity?: number;
 }
 
 // ---------- Comptoir ----------
@@ -733,6 +745,10 @@ export interface CommandDeliveryItem {
   fromReady?: number;
   /** Quantité produite automatiquement pour compléter la livraison. */
   producedQuantity?: number;
+  /** Boîte (variante du stock prêt) de la part `fromReady` — vide = sans boîte. */
+  readyBoxProductId?: string;
+  /** Boîte de la part produite pour ce bon — vide = sans boîte. */
+  producedBoxProductId?: string;
   /** Coût de revient unitaire du produit livré et coût de la ligne. */
   unitCost?: number;
   costAmount?: number;
@@ -824,6 +840,8 @@ export interface DeliveryRecoveryItem {
   amount: number;
   unit?: string;
   readyApplied?: boolean;
+  /** Boîte (variante du stock prêt) dans laquelle la marchandise revient. */
+  boxProductId?: string;
   unitCost?: number;
   costAmount?: number;
 }

@@ -330,6 +330,7 @@ export default function Stock() {
                       <div className="flex flex-col">
                         <span>{p.name}</span>
                         {p.description && <span className="text-xs text-text-muted line-clamp-1">{p.description}</span>}
+                        {p.isBox && <Badge variant="info" className="mt-0.5 w-fit">Boîte</Badge>}
                       </div>
                     </td>
                     <td className="px-4 py-3">

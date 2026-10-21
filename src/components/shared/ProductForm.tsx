@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Package, Ruler, Boxes, Coins, CalendarClock } from 'lucide-react';
+import { Package, Ruler, Boxes, Coins, CalendarClock, Box } from 'lucide-react';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Switch } from '@/components/ui/Switch';
@@ -33,6 +33,7 @@ export function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
     purchasePrice: initial?.purchasePrice ?? 0,
     expirationEnabled: initial?.expirationEnabled ?? false,
     expirationDate: initial?.expirationDate || '',
+    isBox: initial?.isBox ?? false,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -68,6 +69,7 @@ export function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
         unit: form.unit.trim(),
         expirationEnabled: form.expirationEnabled,
         expirationDate: form.expirationEnabled ? form.expirationDate || null : null,
+        isBox: form.isBox,
       });
     } finally {
       setSaving(false);
@@ -170,6 +172,22 @@ export function ProductForm({ initial, onSubmit, onCancel }: ProductFormProps) {
             />
           )}
         </div>
+      </section>
+
+      {/* 5 — Boîte (emballage) */}
+      <section className="rounded-2xl border border-gold/15 bg-vanilla/30 p-4 space-y-3">
+        <h3 className="flex items-center gap-2 font-display font-semibold text-text-primary text-sm">
+          <Box size={16} className="text-gold" /> 5. Boîte / emballage (optionnel)
+        </h3>
+        <p className="text-xs text-text-muted">
+          Activez cette option si ce produit est une boîte : elle sera proposée lors de la création
+          d'une production, d'un bon de livraison et d'une vente en caisse, puis déduite automatiquement du stock.
+        </p>
+        <Switch
+          checked={form.isBox}
+          onChange={(v) => set('isBox', v)}
+          label="Ce produit est une boîte"
+        />
       </section>
 
       <div className="flex justify-end gap-3 pt-1">

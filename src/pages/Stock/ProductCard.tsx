@@ -1,4 +1,4 @@
-import { Eye, Pencil, Trash2, User, Ruler, AlertTriangle, TrendingUp, History } from 'lucide-react';
+import { Eye, Pencil, Trash2, User, Ruler, AlertTriangle, TrendingUp, History, Box } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -49,11 +49,18 @@ export function ProductCard({ product, index, onView, onEdit, onDelete, onHistor
             </p>
           )}
         </div>
-        {unit && (
-          <Badge variant="warning" className="shrink-0 gap-1 bg-caramel/15 text-caramel border border-caramel/30">
-            <Ruler size={10} /> {unit}
-          </Badge>
-        )}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {unit && (
+            <Badge variant="warning" className="shrink-0 gap-1 bg-caramel/15 text-caramel border border-caramel/30">
+              <Ruler size={10} /> {unit}
+            </Badge>
+          )}
+          {product.isBox && (
+            <Badge variant="info" className="shrink-0 gap-1">
+              <Box size={10} /> Boîte
+            </Badge>
+          )}
+        </div>
       </div>
 
       {/* Current stock + gauge */}

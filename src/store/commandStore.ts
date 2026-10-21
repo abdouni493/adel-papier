@@ -153,6 +153,11 @@ export interface ClientDeliveryInput {
   lines: ClientDeliveryLineInput[];
   /** Quantités livrées HORS commande : une commande est créée pour elles. */
   directLines?: (ClientDeliveryLineInput & { unitPrice: number; sellByUnit?: boolean; sellUnit?: string })[];
+  /**
+   * Boîtes, par produit (fiche technique) : variante du stock prêt à livrer
+   * ('' = sans boîte) et boîte du stock pour la partie produite.
+   */
+  boxes?: Record<string, { readyBoxId?: string; boxProductId?: string; boxQuantity?: number }>;
 }
 
 /** Récupération de marchandise saisie sur un bon de livraison. */
@@ -327,6 +332,13 @@ const clientDeliveryPayload = (i: ClientDeliveryInput) => ({
       sell_by_unit: !!l.sellByUnit,
       sell_unit: l.sellUnit ?? null,
     })),
+  boxes: Object.fromEntries(
+    Object.entries(i.boxes ?? {}).map(([fiche, b]) => [fiche, {
+      ...(b.readyBoxId === undefined ? {} : { ready_box_product_id: b.readyBoxId }),
+      box_product_id: b.boxProductId || null,
+      box_quantity: b.boxProductId ? b.boxQuantity ?? 0 : 0,
+    }])
+  ),
 });
 
 /** Option TVA envoyee a la base — omise quand l'appelant ne la precise pas. */

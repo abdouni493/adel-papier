@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   FlaskConical, Plus, Eye, Trash2, Search, X, Clock, User, Pencil, FileText,
   BookOpen, AlertTriangle, Printer, Factory, Coins, TrendingUp, PackageCheck,
-  CreditCard, Receipt, Truck, ImagePlus, Tags,
+  CreditCard, Receipt, Truck, ImagePlus, Tags, Box,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SearchBar } from '@/components/ui/SearchBar';
@@ -23,12 +23,13 @@ import { StatCard } from '@/components/shared/StatCard';
 import { useSettingsStore } from '@/store/settingsStore';
 import { printProductionSheet } from '@/lib/documents';
 import { uploadImage } from '@/lib/storage';
-import { readyByFiche, onComptoirByFiche } from '@/lib/readyStock';
+import { readyByFiche, readyByFicheBox, readyVariantsOf, boxNames, boxKey } from '@/lib/readyStock';
 import { useComptoirStore } from '@/store/comptoirStore';
 import { useSalesStore } from '@/store/salesStore';
 import { useCommandStore } from '@/store/commandStore';
 import { PriceListDialog } from './PriceListDialog';
 import { FicheTechnicView } from '@/components/shared/FicheTechnicView';
+import { BoxChoiceDialog, type BoxChoice } from '@/components/shared/BoxChoiceDialog';
 import { motion } from 'framer-motion';
 import { useProductionStore } from '@/store/productionStore';
 import { useFicheTechnicStore, type FicheTechnic } from '@/store/ficheTechnicStore';
@@ -54,7 +55,24 @@ export default function ProductionPage() {
     () => readyByFiche(productions, deliveries, recoveries, comptoirItems, sales),
     [productions, deliveries, recoveries, comptoirItems, sales]
   );
-  const onComptoirMap = useMemo(() => onComptoirByFiche(productions, comptoirItems), [productions, comptoirItems]);
+  /** Stock prêt par boîte (variante) de chaque produit. */
+  const readyBoxMap = useMemo(
+    () => readyByFicheBox(productions, deliveries, recoveries, comptoirItems, sales),
+    [productions, deliveries, recoveries, comptoirItems, sales]
+  );
+  const namesOfBoxes = useMemo(() => boxNames(productions), [productions]);
+  /** Comptoir encore disponible par variante « fiche:boîte ». */
+  const onComptoirBoxMap = useMemo(() => {
+    const byId = new Map(productions.map((p) => [p.id, p]));
+    const m = new Map<string, number>();
+    comptoirItems.forEach((c) => {
+      const p = byId.get(c.productionId);
+      if (!p || p.origin === 'pos' || !p.ficheTechnicId || c.quantity <= 0) return;
+      const k = `${p.ficheTechnicId}:${boxKey(p.boxProductId)}`;
+      m.set(k, (m.get(k) ?? 0) + c.quantity);
+    });
+    return m;
+  }, [productions, comptoirItems]);
   const [priceListOpen, setPriceListOpen] = useState(false);
 
   /** Imprime la fiche complète d'une production (matières, résultat, gains). */
@@ -156,6 +174,7 @@ export default function ProductionPage() {
           {p.origin === 'pos' && <Badge variant="success" className="text-[9px]">Caisse</Badge>}
           {p.origin === 'delivery' && <Badge variant="warning" className="text-[9px]">Livraison</Badge>}
           {p.hasLoss && <Badge variant="danger" className="text-[9px]">Perte</Badge>}
+          {p.boxProductId && <Badge variant="info" className="text-[9px]">{p.boxProductName ?? 'Boîte'}</Badge>}
         </span>
       ) },
     { key: 'date', label: 'Date', render: (p) => `${formatDate(p.date, language)} ${p.hour ?? ''}` },
@@ -181,7 +200,10 @@ export default function ProductionPage() {
   const transferableOf = (p: Production) => {
     const rest = p.outputQuantity - (p.sentToComptoir ?? 0);
     if (p.origin === 'pos' || !p.ficheTechnicId) return Math.max(0, rest);
-    const free = (readyMap.get(p.ficheTechnicId) ?? 0) - (onComptoirMap.get(p.ficheTechnicId) ?? 0);
+    // contrôle par boîte, comme la base (_transfer_to_comptoir)
+    const bk = boxKey(p.boxProductId);
+    const free = (readyBoxMap.get(p.ficheTechnicId)?.get(bk) ?? 0)
+      - (onComptoirBoxMap.get(`${p.ficheTechnicId}:${bk}`) ?? 0);
     return Math.max(0, Math.min(rest, free));
   };
 
@@ -315,6 +337,11 @@ export default function ProductionPage() {
                         <Badge variant="warning" className="gap-1"><Truck size={10} /> Auto · livraison</Badge>
                       )}
                       {p.categoryName && <Badge variant="info">{p.categoryName}</Badge>}
+                      {p.boxProductId && (
+                        <Badge variant="info" className="gap-1">
+                          <Box size={10} /> {p.boxProductName ?? 'Boîte'}{p.boxQuantity ? ` × ${p.boxQuantity}` : ''}
+                        </Badge>
+                      )}
                       {p.hasLoss && (
                         <motion.div animate={{ opacity: [1, 0.6, 1] }} transition={{ duration: 2, repeat: Infinity }}>
                           <Badge variant="danger" className="gap-1"><AlertTriangle size={10} /> Perte</Badge>
@@ -452,6 +479,16 @@ export default function ProductionPage() {
                   
                   <div className="bg-vanilla/40 rounded-xl p-3 space-y-1.5 text-xs mb-3">
                     <div className="flex justify-between"><span className="text-text-muted">Stock prêt (non livré)</span><span className="tabular font-bold text-pistachio">{Math.max(0, readyMap.get(ft.id) ?? 0)}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span></div>
+                    {(() => {
+                      const variants = readyVariantsOf(readyBoxMap, ft.id, namesOfBoxes);
+                      if (variants.length < 2 && !variants.some((v) => v.boxId)) return null;
+                      return variants.map((v) => (
+                        <div key={v.boxId || 'none'} className="flex justify-between pl-3 text-[11px]">
+                          <span className="flex items-center gap-1 text-text-muted"><Box size={10} /> {v.boxName}</span>
+                          <span className="tabular text-pistachio">{v.ready}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span>
+                        </div>
+                      ));
+                    })()}
                     <div className="flex justify-between"><span className="text-text-muted">Ingrédients</span><span className="tabular text-text-secondary">{ft.usedProducts.length}</span></div>
                     <div className="flex justify-between"><span className="text-text-muted">Rendement base</span><span className="tabular font-medium text-text-primary">{ft.outputQuantity}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span></div>
                     <div className="flex justify-between"><span className="text-text-muted">Coût base total</span><span className="tabular text-rose-deep font-semibold">{formatCurrency(ft.totalCost)}</span></div>
@@ -522,6 +559,12 @@ export default function ProductionPage() {
                 <div className="flex flex-wrap items-center gap-2">
                   {prodViewing.categoryName && <Badge variant="info">{prodViewing.categoryName}</Badge>}
                   {prodViewing.sellByUnit && prodViewing.sellUnit && <Badge variant="warning">{t('sellUnit')}: {prodViewing.sellUnit}</Badge>}
+                  {prodViewing.boxProductId && (
+                    <Badge variant="info" className="gap-1">
+                      <Box size={10} /> {prodViewing.boxProductName ?? 'Boîte'}
+                      {prodViewing.boxQuantity ? ` × ${prodViewing.boxQuantity}` : ''}
+                    </Badge>
+                  )}
                   {prodViewing.origin === 'pos' && (
                     <Badge variant="success" className="gap-1">
                       <CreditCard size={10} /> Lancée depuis le point de vente
@@ -548,7 +591,10 @@ export default function ProductionPage() {
                     <tbody>
                       {prodViewing.usedProducts.map((u, i) => (
                         <tr key={i} className="border-t border-gold/10">
-                          <td className="px-3 py-2 font-medium">{u.productName}</td>
+                          <td className="px-3 py-2 font-medium">
+                            {u.productName}
+                            {u.isBox && <Badge variant="info" className="ml-1.5 text-[9px]">Boîte</Badge>}
+                          </td>
                           <td className="px-3 py-2 text-right tabular">{u.quantityUsed}{u.unit ? ` ${u.unit}` : ''}</td>
                           <td className="px-3 py-2 text-right tabular">{formatCurrency(u.unitCost ?? 0)}</td>
                           <td className="px-3 py-2 text-right tabular text-rose-deep">{formatCurrency(u.lineCost ?? (u.quantityUsed * (u.unitCost ?? 0)))}</td>
@@ -1191,6 +1237,8 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
   const [hasLoss, setHasLoss] = useState(false);
   const [realQuantity, setRealQuantity] = useState<number>(0);
   const [lossDescription, setLossDescription] = useState('');
+  // Boîte demandée juste avant la création
+  const [boxAsk, setBoxAsk] = useState(false);
 
   const ficheResults = useMemo(() => {
     if (!ficheSearch) return [];
@@ -1314,6 +1362,13 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
       return;
     }
 
+    // avant la création : dans quelle boîte ce lot est-il conditionné ?
+    setBoxAsk(true);
+  };
+
+  const submitWithBox = (box?: BoxChoice) => {
+    if (!selectedFt) return;
+    setBoxAsk(false);
     const lossActive = hasLoss && lossQuantity > 0;
 
     onSubmit({
@@ -1343,6 +1398,8 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
       lossQuantity: lossActive ? Number(lossQuantity) : undefined,
       lossDescription: lossActive ? lossDescription.trim() : undefined,
       lossValue: lossActive ? Number(lossValue) : undefined,
+      boxProductId: box?.boxProductId || undefined,
+      boxQuantity: box?.boxProductId ? box.boxQuantity : undefined,
     });
   };
 
@@ -1568,6 +1625,25 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
           Valider la Production
         </Button>
       </div>
+
+      {selectedFt && (
+        <BoxChoiceDialog
+          open={boxAsk}
+          title="Boîte de la production"
+          intro="Choisissez la boîte du stock dans laquelle ce lot est conditionné (ou « Sans boîte »). Les boîtes seront déduites du stock."
+          requests={[{
+            key: 'production',
+            productName: selectedFt.name,
+            unit: selectedFt.sellByUnit ? selectedFt.sellUnit : undefined,
+            ficheId: selectedFt.id,
+            quantity: Number(finalOutputQuantity) || 0,
+            variants: [],
+          }]}
+          confirmLabel="Créer la production"
+          onCancel={() => setBoxAsk(false)}
+          onConfirm={(c) => submitWithBox(c.production)}
+        />
+      )}
     </div>
   );
 }
