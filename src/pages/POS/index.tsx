@@ -513,6 +513,7 @@ export default function POS() {
         readyBoxId: boxChoices?.[line.key]?.readyBoxId,
         boxProductId: boxChoices?.[line.key]?.boxProductId || undefined,
         boxQuantity: boxChoices?.[line.key]?.boxQuantity,
+        boxCapacity: boxChoices?.[line.key]?.boxCapacity,
       }));
 
       // snapshot the recipe details before the cart is emptied — the invoice

@@ -157,7 +157,7 @@ export interface ClientDeliveryInput {
    * Boîtes, par produit (fiche technique) : variante du stock prêt à livrer
    * ('' = sans boîte) et boîte du stock pour la partie produite.
    */
-  boxes?: Record<string, { readyBoxId?: string; boxProductId?: string; boxQuantity?: number }>;
+  boxes?: Record<string, { readyBoxId?: string; boxProductId?: string; boxQuantity?: number; boxCapacity?: number }>;
 }
 
 /** Récupération de marchandise saisie sur un bon de livraison. */
@@ -337,6 +337,7 @@ const clientDeliveryPayload = (i: ClientDeliveryInput) => ({
       ...(b.readyBoxId === undefined ? {} : { ready_box_product_id: b.readyBoxId }),
       box_product_id: b.boxProductId || null,
       box_quantity: b.boxProductId ? b.boxQuantity ?? 0 : 0,
+      box_capacity: b.boxProductId ? b.boxCapacity ?? null : null,
     }])
   ),
 });

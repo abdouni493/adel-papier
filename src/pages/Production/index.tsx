@@ -1400,6 +1400,7 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
       lossValue: lossActive ? Number(lossValue) : undefined,
       boxProductId: box?.boxProductId || undefined,
       boxQuantity: box?.boxProductId ? box.boxQuantity : undefined,
+      boxCapacity: box?.boxProductId ? box.boxCapacity : undefined,
     });
   };
 

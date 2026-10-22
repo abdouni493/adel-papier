@@ -5,7 +5,7 @@ import type {
   Production, ComptoirItem, Destruction, Worker, Role, Expense, CaisseTransaction,
   CaisseReport, StoreSettings, PartyPayment, CommandDelivery, WorkerOvertime, WorkerLate,
   PurchaseOrder, PaymentMethodDetails, PartyOldDebt, PartyCreditRefund, PartyType,
-  CommandAdjustment, DeliveryRecovery, FreeInvoice,
+  CommandAdjustment, DeliveryRecovery, FreeInvoice, BoxCapacity,
 } from '@/types';
 import type { Command } from '@/store/commandStore';
 import type { FicheTechnic } from '@/store/ficheTechnicStore';
@@ -993,6 +993,16 @@ export const db = {
       (await select<any>('productions', '*, production_used_products(*)', 'date')).map(toProduction),
     update: (id: string, data: Record<string, any>) => update('productions', id, data),
     remove: (id: string) => remove('productions', id),
+  },
+  /** Contenance mémorisée de chaque boîte, par produit fini. */
+  boxCapacities: {
+    list: async (): Promise<BoxCapacity[]> =>
+      (await selectOptional<any>('box_capacities', '*', 'updated_at')).map((r) => ({
+        ficheTechnicId: r.fiche_technic_id,
+        boxProductId: r.box_product_id,
+        capacity: num(r.capacity),
+        updatedAt: r.updated_at ?? '',
+      })),
   },
   productionCategories: {
     list: async (): Promise<Category[]> => (await select<any>('production_categories')).map(simpleName),

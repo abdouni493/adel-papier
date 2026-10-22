@@ -377,6 +377,14 @@ export interface Production {
   boxQuantity?: number;
 }
 
+/** Contenance d'une boîte pour un produit fini (unités du produit par boîte). */
+export interface BoxCapacity {
+  ficheTechnicId: string;
+  boxProductId: string;
+  capacity: number;
+  updatedAt: string;
+}
+
 // ---------- Comptoir ----------
 export interface ComptoirItem {
   id: string;

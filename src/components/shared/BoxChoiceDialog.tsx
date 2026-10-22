@@ -4,6 +4,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useStockStore } from '@/store/stockStore';
+import { db } from '@/lib/db';
+import type { BoxCapacity } from '@/types';
 import type { ReadyVariant } from '@/lib/readyStock';
 
 const r3 = (n: number) => Math.round((n || 0) * 1000) / 1000;
@@ -29,6 +31,8 @@ export interface BoxChoice {
   /** Boîte du stock pour la production ('' = sans boîte) et nombre de boîtes. */
   boxProductId: string;
   boxQuantity: number;
+  /** Contenance de la boîte pour ce produit (mémorisée par la base). */
+  boxCapacity?: number;
 }
 
 interface Props {
@@ -62,8 +66,16 @@ export function BoxChoiceDialog({
   const [ready, setReady] = useState<Record<string, string | undefined>>({});
   const [box, setBox] = useState<Record<string, string>>({});
   const [qty, setQty] = useState<Record<string, string>>({});
+  /** Contenance saisie (unités du produit par boîte). */
+  const [cap, setCap] = useState<Record<string, string>>({});
+  /** Contenances mémorisées, la plus récente d'abord. */
+  const [saved, setSaved] = useState<BoxCapacity[]>([]);
 
-  // à chaque ouverture : variante la plus fournie, aucune boîte
+  const savedCap = (ficheId: string | undefined, boxId: string) =>
+    saved.find((c) => c.ficheTechnicId === ficheId && c.boxProductId === boxId)?.capacity;
+
+  // à chaque ouverture : variante la plus fournie ; boîte et contenance de la
+  // dernière opération du produit
   useEffect(() => {
     if (!open) return;
     const r: Record<string, string | undefined> = {};
@@ -71,8 +83,39 @@ export function BoxChoiceDialog({
     setReady(r);
     setBox({});
     setQty({});
+    setCap({});
+    let alive = true;
+    db.boxCapacities.list().then((rows) => {
+      if (!alive) return;
+      setSaved(rows);
+      const b: Record<string, string> = {};
+      const c: Record<string, string> = {};
+      requests.forEach((q) => {
+        const last = rows.find((x) => x.ficheTechnicId === q.ficheId && boxes.some((p) => p.id === x.boxProductId));
+        if (!last) return;
+        b[q.key] = last.boxProductId;
+        c[q.key] = String(last.capacity);
+      });
+      setBox((cur) => ({ ...b, ...cur }));
+      setCap((cur) => ({ ...c, ...cur }));
+    }).catch(() => undefined);
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  /** Nombre de boîtes : saisi, sinon quantité ÷ contenance (arrondi au supérieur). */
+  const boxCount = (key: string, toProduce: number) => {
+    if (qty[key] !== undefined && qty[key] !== '') return Math.max(0, Number(qty[key]) || 0);
+    const c = Number(cap[key]) || 0;
+    return c > 0 && toProduce > 0 ? Math.ceil(toProduce / c - 1e-9) : 0;
+  };
+
+  const chooseBox = (q: BoxRequest, id: string) => {
+    setBox((b) => ({ ...b, [q.key]: id }));
+    const c = id ? savedCap(q.ficheId, id) : undefined;
+    setCap((x) => ({ ...x, [q.key]: c ? String(c) : '' }));
+    setQty((x) => ({ ...x, [q.key]: '' }));
+  };
 
   /** Quantité produite par ligne, comme la base : stock prêt de la variante d'abord. */
   const plan = useMemo(() => {
@@ -94,7 +137,7 @@ export function BoxChoiceDialog({
     plan.forEach(({ q, toProduce }) => {
       const b = box[q.key];
       if (!b || toProduce <= 0.0005) return;
-      need.set(b, (need.get(b) ?? 0) + Math.max(0, Number(qty[q.key]) || 0));
+      need.set(b, (need.get(b) ?? 0) + boxCount(q.key, toProduce));
     });
     const short: string[] = [];
     need.forEach((n, id) => {
@@ -102,9 +145,10 @@ export function BoxChoiceDialog({
       if (p && n > p.currentQuantity + 0.0005) short.push(`${p.name} (stock ${p.currentQuantity}, demandé ${n})`);
     });
     return short;
-  }, [plan, box, qty, boxes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, box, qty, cap, boxes]);
 
-  const missingQty = plan.some(({ q, toProduce }) => toProduce > 0.0005 && box[q.key] && !(Number(qty[q.key]) > 0));
+  const missingQty = plan.some(({ q, toProduce }) => toProduce > 0.0005 && box[q.key] && !(boxCount(q.key, toProduce) > 0));
 
   const confirm = () => {
     const out: Record<string, BoxChoice> = {};
@@ -114,7 +158,8 @@ export function BoxChoiceDialog({
         readyBoxId: ready[q.key],
         toProduce,
         boxProductId: b,
-        boxQuantity: b ? Math.max(0, Number(qty[q.key]) || 0) : 0,
+        boxQuantity: b ? boxCount(q.key, toProduce) : 0,
+        boxCapacity: b && Number(cap[q.key]) > 0 ? Number(cap[q.key]) : undefined,
       };
     });
     onConfirm(out);
@@ -142,6 +187,8 @@ export function BoxChoiceDialog({
           const u = q.unit ? ` ${q.unit}` : '';
           const selectedBox = box[q.key] ?? '';
           const boxProduct = boxes.find((b) => b.id === selectedBox);
+          const count = boxCount(q.key, toProduce);
+          const manual = qty[q.key] !== undefined && qty[q.key] !== '';
           return (
             <section key={q.key} className="rounded-2xl border border-gold/15 bg-vanilla/30 p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -194,10 +241,10 @@ export function BoxChoiceDialog({
                   <p className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
                     <Factory size={14} className="text-gold" /> {toProduce}{u} seront produits — dans quelle boîte ?
                   </p>
-                  <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
+                  <div className="grid gap-2">
                     <select
                       value={selectedBox}
-                      onChange={(e) => setBox((b) => ({ ...b, [q.key]: e.target.value }))}
+                      onChange={(e) => chooseBox(q, e.target.value)}
                       className="h-10 w-full rounded-xl border border-[--border-input] bg-[--surface-input] px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-gold/40"
                     >
                       <option value="">Sans boîte</option>
@@ -208,20 +255,48 @@ export function BoxChoiceDialog({
                       ))}
                     </select>
                     {selectedBox && (
-                      <Input
-                        type="number" step="any" min={0}
-                        placeholder="Nb de boîtes"
-                        value={qty[q.key] ?? ''}
-                        onChange={(e) => setQty((x) => ({ ...x, [q.key]: e.target.value }))}
-                      />
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <label className="space-y-1 text-[11px] font-semibold text-text-secondary">
+                          <span>Contenance : {q.unit || 'unités'} par boîte</span>
+                          <Input
+                            type="number" step="any" min={0}
+                            placeholder="ex. 12"
+                            value={cap[q.key] ?? ''}
+                            onChange={(e) => {
+                              setCap((x) => ({ ...x, [q.key]: e.target.value }));
+                              setQty((x) => ({ ...x, [q.key]: '' }));
+                            }}
+                          />
+                        </label>
+                        <label className="space-y-1 text-[11px] font-semibold text-text-secondary">
+                          <span>Nombre de boîtes {manual ? '(modifié)' : '(automatique)'}</span>
+                          <Input
+                            type="number" step="any" min={0}
+                            placeholder="Nb de boîtes"
+                            value={manual ? qty[q.key] : count ? String(count) : ''}
+                            onChange={(e) => setQty((x) => ({ ...x, [q.key]: e.target.value }))}
+                          />
+                        </label>
+                      </div>
                     )}
                   </div>
+                  {selectedBox && Number(cap[q.key]) > 0 && (
+                    <p className="text-[11px] text-text-muted">
+                      {toProduce}{u} ÷ {Number(cap[q.key])} par boîte = {Math.ceil(toProduce / Number(cap[q.key]) - 1e-9)} boîte(s)
+                      {savedCap(q.ficheId, selectedBox) === Number(cap[q.key]) ? ' · contenance mémorisée' : ' · sera mémorisée'}
+                      {manual && (
+                        <button type="button" className="ml-2 text-gold-dark hover:underline" onClick={() => setQty((x) => ({ ...x, [q.key]: '' }))}>
+                          recalculer
+                        </button>
+                      )}
+                    </p>
+                  )}
                   {boxes.length === 0 && (
                     <p className="text-[11px] text-text-muted">
                       Aucune boîte dans la gestion de stock : activez « Ce produit est une boîte » sur un produit.
                     </p>
                   )}
-                  {boxProduct && Number(qty[q.key]) > boxProduct.currentQuantity && (
+                  {boxProduct && count > boxProduct.currentQuantity && (
                     <p className="text-[11px] font-semibold text-rose-deep">Stock de boîtes insuffisant.</p>
                   )}
                 </div>
@@ -238,7 +313,7 @@ export function BoxChoiceDialog({
           </div>
         )}
         {missingQty && (
-          <p className="text-xs font-semibold text-rose-deep">Indiquez le nombre de boîtes pour chaque boîte choisie.</p>
+          <p className="text-xs font-semibold text-rose-deep">Indiquez la contenance ou le nombre de boîtes pour chaque boîte choisie.</p>
         )}
       </div>
     </Modal>

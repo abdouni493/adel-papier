@@ -45,6 +45,8 @@ export interface PosProductionInput {
   /** Boîte du stock pour la quantité produite, et nombre de boîtes. */
   boxProductId?: string;
   boxQuantity?: number;
+  /** Contenance de la boîte pour ce produit (mémorisée). */
+  boxCapacity?: number;
 }
 
 export type PosSaleLine = SaleLine & { lineKey?: string };
@@ -76,6 +78,7 @@ const productionPayload = (pr: PosProductionInput, hour?: string) => ({
   ...(pr.readyBoxId === undefined ? {} : { ready_box_product_id: pr.readyBoxId }),
   box_product_id: pr.boxProductId || null,
   box_quantity: pr.boxProductId ? pr.boxQuantity ?? 0 : 0,
+  box_capacity: pr.boxProductId ? pr.boxCapacity ?? null : null,
 });
 
 export interface AddPosSaleInput {

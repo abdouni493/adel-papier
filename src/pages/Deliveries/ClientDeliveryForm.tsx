@@ -438,7 +438,7 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
     if (!pendingInput) return;
     const boxes: NonNullable<ClientDeliveryInput['boxes']> = {};
     Object.entries(choices).forEach(([ficheId, c]) => {
-      boxes[ficheId] = { readyBoxId: c.readyBoxId, boxProductId: c.boxProductId, boxQuantity: c.boxQuantity };
+      boxes[ficheId] = { readyBoxId: c.readyBoxId, boxProductId: c.boxProductId, boxQuantity: c.boxQuantity, boxCapacity: c.boxCapacity };
     });
     await submit({ ...pendingInput, boxes });
     setBoxRequests(null);

@@ -28,6 +28,8 @@ export interface AddProductionInput {
   /** Boîte du stock dans laquelle le lot est conditionné (déduite du stock). */
   boxProductId?: string;
   boxQuantity?: number;
+  /** Contenance de la boîte pour ce produit (mémorisée pour la prochaine fois). */
+  boxCapacity?: number;
 }
 
 interface ProductionState {
@@ -57,7 +59,7 @@ export const useProductionStore = create<ProductionState>()(stable((set, get) =>
     const {
       name, description, date, hour, categoryId, categoryName, ficheTechnicId, usedProducts,
       outputQuantity, unitPrice, sellByUnit, sellUnit,
-      hasLoss, expectedQuantity, lossQuantity, lossDescription, lossValue, boxProductId, boxQuantity,
+      hasLoss, expectedQuantity, lossQuantity, lossDescription, lossValue, boxProductId, boxQuantity, boxCapacity,
     } = data;
 
     // create_production() writes the batch, its ingredients and consumes the stock
@@ -78,6 +80,7 @@ export const useProductionStore = create<ProductionState>()(stable((set, get) =>
         loss_value: lossValue ?? 0,
         box_product_id: boxProductId || null,
         box_quantity: boxProductId ? boxQuantity ?? 0 : 0,
+        box_capacity: boxProductId ? boxCapacity ?? null : null,
         used_products: usedProducts.map((u) => ({
           product_id: u.productId,
           product_name: u.productName,
