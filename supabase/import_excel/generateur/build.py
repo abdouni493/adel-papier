@@ -2,7 +2,7 @@ import os, sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import itertools, datetime, json, re
 from parse import load, num, low, dt
 
-TODAY = datetime.date(2026, 10, 19)
+TODAY = datetime.date.today()
 MIN_DATE = datetime.date(2018, 1, 1)
 TOL = 1.0
 
@@ -33,6 +33,8 @@ def block_lines(b):
                 continue
         if not a and not name:
             continue
+        if not a and not q and not re.search(r'[A-Za-z]{2}', name):
+            continue   # stray mark in the sheet ('*', '0 µ', '2025', ', ,' …), not an article
         if not name: name = 'Article (désignation non saisie)'
         a = a or 0.0
         if not q:
@@ -251,6 +253,8 @@ def emit_strip(st, key, sheet_tag):
             b = e['src']; row = b.get('row')
             lines = [list(x) for x in e['lines']]
             if e['sign'] > 0:
+                if not lines and e['amount'] <= 0.004:
+                    continue   # empty bon (nothing written but its frame)
                 if not lines:
                     lines = [['Bon de livraison (détail non saisi dans Excel)', 1.0, e['amount']]]
                 diff = r2(e['amount'] - lines_sum(lines))
