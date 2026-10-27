@@ -44,6 +44,8 @@ interface ProductionState {
    */
   rescaleProduction: (id: string, outputQuantity: number,
     data?: Partial<Pick<Production, 'description' | 'date' | 'hour' | 'unitPrice' | 'lossDescription'>>) => Promise<void>;
+  /** Modification complète d'un lot (même saisie que la création) : ses matières sont remplacées. */
+  editProduction: (id: string, data: AddProductionInput) => Promise<void>;
   deleteProduction: (id: string) => Promise<void>;
   transferToComptoir: (id: string, qty: number) => Promise<void>;
   addCategory: (name: string) => Promise<Category>;
@@ -175,6 +177,50 @@ export const useProductionStore = create<ProductionState>()(stable((set, get) =>
           loss_value: Number(((prod.lossValue ?? 0) * factor).toFixed(2)),
           loss_description: data.lossDescription ?? prod.lossDescription ?? null,
         } : {}),
+      });
+    });
+    const [productions] = await Promise.all([db.productions.list(), useStockStore.getState().load()]);
+    set({ productions });
+  },
+
+  editProduction: async (id, data) => {
+    const prod = get().productions.find((p) => p.id === id);
+    if (!prod) return;
+    if (data.outputQuantity < (prod.sentToComptoir ?? 0)) {
+      throw new Error(`Déjà ${prod.sentToComptoir} envoyé(s) au comptoir : la quantité ne peut pas descendre en dessous`);
+    }
+    const lines = data.usedProducts.map((u) => ({
+      product_id: u.productId || null,
+      product_name: u.productName,
+      quantity_used: u.quantityUsed,
+      source_type: u.sourceType ?? 'stock',
+      unit: u.unit ?? null,
+      unit_cost: u.unitCost ?? 0,
+      line_cost: u.lineCost ?? 0,
+    }));
+    const boxCost = prod.usedProducts.filter((u) => u.isBox).reduce((s, u) => s + (u.lineCost ?? 0), 0);
+    const totalCost = lines.reduce((s, l) => s + l.line_cost, 0) + boxCost;
+    await save('productions.edit', async () => {
+      await db.productions.replaceUsedProducts(id, lines);
+      await db.productions.update(id, {
+        name: data.name,
+        description: data.description,
+        date: data.date,
+        hour: data.hour,
+        fiche_technic_id: data.ficheTechnicId ?? null,
+        category_id: data.categoryId ?? null,
+        category_name: data.categoryName ?? null,
+        output_quantity: data.outputQuantity,
+        unit_price: data.unitPrice,
+        total_value: Number((data.outputQuantity * data.unitPrice).toFixed(2)),
+        total_cost: Number(totalCost.toFixed(2)),
+        sell_by_unit: data.sellByUnit ?? false,
+        sell_unit: data.sellUnit ?? null,
+        has_loss: data.hasLoss ?? false,
+        expected_quantity: data.expectedQuantity ?? null,
+        loss_quantity: data.lossQuantity ?? 0,
+        loss_description: data.lossDescription ?? null,
+        loss_value: data.lossValue ?? 0,
       });
     });
     const [productions] = await Promise.all([db.productions.list(), useStockStore.getState().load()]);

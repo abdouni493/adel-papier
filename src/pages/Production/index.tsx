@@ -43,7 +43,7 @@ import type { Production, UsedProduct, Product } from '@/types';
 export default function ProductionPage() {
   const { t, language } = useLanguage();
   const { can } = usePermissions();
-  const { productions, addProduction, deleteProduction } = useProductionStore();
+  const { productions, addProduction, editProduction, deleteProduction } = useProductionStore();
   const { ficheTechnics, deleteFicheTechnic } = useFicheTechnicStore();
   const settings = useSettingsStore((s) => s.settings);
   const deliveries = useCommandStore((s) => s.deliveries);
@@ -707,12 +707,21 @@ export default function ProductionPage() {
 
       <PriceListDialog open={priceListOpen} onClose={() => setPriceListOpen(false)} />
 
-      <Modal open={!!prodEditing} onClose={() => setProdEditing(null)} title="Modifier la production" size="md">
+      <Modal open={!!prodEditing} onClose={() => setProdEditing(null)} title="Modifier la Production" size="lg">
         {prodEditing && (
-          <EditProductionModal
-            production={prodEditing}
+          <CreateProductionForm
+            initial={prodEditing}
             maxDecrease={maxDecreaseOf(prodEditing)}
             onClose={() => setProdEditing(null)}
+            onSubmit={async (data) => {
+              try {
+                await editProduction(prodEditing.id, data);
+                toast.success('Production modifiée — stock des matières mis à jour');
+                setProdEditing(null);
+              } catch (e: any) {
+                toast.error(e.message || 'Une erreur est survenue');
+              }
+            }}
           />
         )}
       </Modal>
@@ -822,73 +831,6 @@ function TransferToComptoirModal({ production, maxQuantity, onClose }: {
         <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
         <Button variant="gold" onClick={handleTransfer} disabled={quantity <= 0 || quantity > remainingQty}>
           Mettre au comptoir
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/** Modifier un lot : quantité (matières redosées), date, heure, prix, description. */
-function EditProductionModal({ production, maxDecrease, onClose }: {
-  production: Production; maxDecrease: number; onClose: () => void;
-}) {
-  const { t } = useLanguage();
-  const rescaleProduction = useProductionStore((s) => s.rescaleProduction);
-  const [quantity, setQuantity] = useState<number>(production.outputQuantity);
-  const [date, setDate] = useState(production.date);
-  const [hour, setHour] = useState(production.hour ?? '');
-  const [unitPrice, setUnitPrice] = useState<number>(production.unitPrice);
-  const [description, setDescription] = useState(production.description ?? '');
-  const [lossDescription, setLossDescription] = useState(production.lossDescription ?? '');
-  const [saving, setSaving] = useState(false);
-  const su = production.sellByUnit && production.sellUnit ? ` ${production.sellUnit}` : '';
-  const minQuantity = Math.max(production.sentToComptoir ?? 0, production.outputQuantity - maxDecrease);
-  const factor = production.outputQuantity > 0 ? quantity / production.outputQuantity : 1;
-
-  const handleSave = async () => {
-    if (quantity <= 0) { toast.error('La quantité doit être supérieure à 0'); return; }
-    if (quantity < minQuantity) {
-      toast.error(`Une partie du lot est déjà livrée, vendue ou au comptoir : minimum ${minQuantity}${su}`);
-      return;
-    }
-    setSaving(true);
-    try {
-      await rescaleProduction(production.id, Number(quantity), {
-        date, hour, unitPrice: Number(unitPrice), description: description.trim(),
-        lossDescription: production.hasLoss ? lossDescription.trim() : undefined,
-      });
-      toast.success('Production modifiée');
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message || 'Une erreur est survenue');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-gold/15 bg-vanilla/30 px-3 py-2 text-xs text-text-secondary">
-        <span className="font-semibold text-text-primary">{production.name}</span> — produit : {production.outputQuantity}{su}
-        {(production.sentToComptoir ?? 0) > 0 && <> · au comptoir : {production.sentToComptoir}{su}</>}
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Input label={`Quantité produite${su ? ` (${su.trim()})` : ''}`} type="number" step="any" min={minQuantity}
-          value={quantity} onChange={(e) => setQuantity(Math.max(0, Number(e.target.value)))} />
-        <Input label="Prix de vente unitaire" type="number" step="any" value={unitPrice}
-          onChange={(e) => setUnitPrice(Number(e.target.value))} />
-        <Input label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        <Input label="Heure" type="time" value={hour} onChange={(e) => setHour(e.target.value)} />
-      </div>
-      <Textarea label="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
-      {production.hasLoss && (
-        <Textarea label={t('lossDescriptionLabel')} value={lossDescription} onChange={(e) => setLossDescription(e.target.value)} rows={2} />
-      )}
-      {factor !== 1 && <MaterialsPreview production={production} factor={factor} />}
-      <div className="flex justify-end gap-3 border-t border-gold/10 pt-4">
-        <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
-        <Button variant="gold" onClick={handleSave} disabled={saving || quantity < minQuantity || quantity <= 0}>
-          {saving ? 'Enregistrement…' : 'Enregistrer'}
         </Button>
       </div>
     </div>
@@ -1524,22 +1466,46 @@ function FicheTechnicForm({ initial, onClose }: { initial?: FicheTechnic; onClos
 // -------------------------------------------------------------
 // Form to Create Production from Fiche Technic
 // -------------------------------------------------------------
-function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSubmit: (data: any) => void | Promise<void> }) {
+function CreateProductionForm({ initial, maxDecrease, onClose, onSubmit }: {
+  /** Lot modifié : le formulaire est prérempli et ses matières comptent comme disponibles. */
+  initial?: Production;
+  maxDecrease?: number;
+  onClose: () => void;
+  onSubmit: (data: any) => void | Promise<void>;
+}) {
   const { t } = useLanguage();
-  const products = useStockStore((s) => s.products);
+  const stockProducts = useStockStore((s) => s.products);
   const { ficheTechnics } = useFicheTechnicStore();
 
+  /** En modification, ce que le lot avait consommé revient au stock disponible. */
+  const products = useMemo(() => {
+    if (!initial) return stockProducts;
+    return stockProducts.map((p) => {
+      const back = initial.usedProducts
+        .filter((u) => !u.isBox && (u.sourceType ?? 'stock') === 'stock' && u.productId === p.id)
+        .reduce((s, u) => s + u.quantityUsed, 0);
+      return back ? { ...p, currentQuantity: Number((p.currentQuantity + back).toFixed(4)) } : p;
+    });
+  }, [stockProducts, initial]);
+
+  const initialFt = initial
+    ? ficheTechnics.find((f) => f.id === initial.ficheTechnicId)
+      ?? ficheTechnics.find((f) => f.name.trim().toLowerCase() === initial.name.trim().toLowerCase())
+      ?? null
+    : null;
+  const initialExpected = initial ? (initial.hasLoss ? initial.expectedQuantity ?? initial.outputQuantity : initial.outputQuantity) : 0;
+
   const [ficheSearch, setFicheSearch] = useState('');
-  const [selectedFt, setSelectedFt] = useState<FicheTechnic | null>(null);
-  
+  const [selectedFt, setSelectedFt] = useState<FicheTechnic | null>(initialFt);
+
   // Production input details (loaded from FT, but quantity can be edited)
-  const [productionQuantity, setProductionQuantity] = useState<number>(0);
+  const [productionQuantity, setProductionQuantity] = useState<number>(initialExpected);
   const [showFicheResults, setShowFicheResults] = useState(false);
 
   // Perte (production loss) option
-  const [hasLoss, setHasLoss] = useState(false);
-  const [realQuantity, setRealQuantity] = useState<number>(0);
-  const [lossDescription, setLossDescription] = useState('');
+  const [hasLoss, setHasLoss] = useState(!!initial?.hasLoss);
+  const [realQuantity, setRealQuantity] = useState<number>(initial?.outputQuantity ?? 0);
+  const [lossDescription, setLossDescription] = useState(initial?.lossDescription ?? '');
   // Boîte demandée juste avant la création
   const [boxAsk, setBoxAsk] = useState(false);
 
@@ -1664,6 +1630,16 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
       toast.error('Certains ingrédients ont un stock insuffisant. Impossible de valider la production.');
       return;
     }
+    if (initial) {
+      const minQty = Math.max(initial.sentToComptoir ?? 0, initial.outputQuantity - (maxDecrease ?? initial.outputQuantity));
+      if (finalOutputQuantity + 0.0005 < minQty) {
+        toast.error(`Une partie du lot est déjà livrée, vendue ou au comptoir : minimum ${minQty}`);
+        return;
+      }
+      // la boîte du lot reste la même : pas de nouvelle demande
+      submitWithBox();
+      return;
+    }
 
     // avant la création : dans quelle boîte ce lot est-il conditionné ?
     setBoxAsk(true);
@@ -1677,8 +1653,8 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
     onSubmit({
       name: selectedFt.name,
       description: selectedFt.description || '',
-      date: todayISO(),
-      hour: nowTime(),
+      date: initial?.date ?? todayISO(),
+      hour: initial?.hour ?? nowTime(),
       categoryId: selectedFt.categoryId,
       categoryName: selectedFt.categoryName,
       // la quantité produite rejoint le STOCK PRÊT de ce produit
@@ -1926,7 +1902,7 @@ function CreateProductionForm({ onClose, onSubmit }: { onClose: () => void; onSu
       <div className="flex justify-end gap-3 border-t border-gold/5 pt-4">
         <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
         <Button variant="gold" onClick={handleSave} disabled={!selectedFt || hasInsufficientStock}>
-          Valider la Production
+          {initial ? 'Enregistrer les modifications' : 'Valider la Production'}
         </Button>
       </div>
 
