@@ -158,6 +158,8 @@ export interface ClientDeliveryInput {
    * ('' = sans boîte) et boîte du stock pour la partie produite.
    */
   boxes?: Record<string, { readyBoxId?: string; boxProductId?: string; boxQuantity?: number; boxCapacity?: number }>;
+  /** Modification : nouveau prix unitaire des lignes de commande servies (id de ligne → prix). */
+  itemPrices?: Record<string, number>;
 }
 
 /** Récupération de marchandise saisie sur un bon de livraison. */
@@ -669,6 +671,11 @@ export const useCommandStore = create<CommandState>()(stable((set, get) => ({
   },
 
   updateClientDelivery: async (id, input) => {
+    // le bon est refait avec le prix des lignes de commande : on les met à jour d'abord
+    const prices = Object.entries(input.itemPrices ?? {});
+    if (prices.length > 0) {
+      await save('commandItems.price', () => Promise.all(prices.map(([itemId, price]) => db.commands.setItemPrice(itemId, price))));
+    }
     await save('deliveries.client.update', () => rpc.updateClientDelivery(id, clientDeliveryPayload(input)));
     const credit = Math.max(0, input.creditUsed ?? 0);
     if (credit > 0.004) {

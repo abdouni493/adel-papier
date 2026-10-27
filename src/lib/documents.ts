@@ -289,9 +289,10 @@ export function printDeliveryNote(data: DeliveryNoteData, store: StoreSettings) 
       endText: data.endText,
       doitName: data.clientName,
       doitLines: fiscalLines({
-        name: data.clientName, phone: data.clientPhone, rc: data.clientRc,
-        nif: data.clientNif, nis: data.clientNis, article: data.clientArticle,
-      }, false),
+        // l'adresse du client s'imprime juste sous son nom
+        name: data.clientName, phone: data.clientPhone, address: data.clientAddress?.trim() || undefined,
+        rc: data.clientRc, nif: data.clientNif, nis: data.clientNis, article: data.clientArticle,
+      }),
       metaLines: [`N° BL : ${data.blNumber ?? data.reference}`],
       minimalHeader: true,
       tables: [

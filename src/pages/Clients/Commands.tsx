@@ -160,8 +160,14 @@ export default function CommandsPage() {
   };
 
   /* --------------------------------------------------------------- filters */
+  /** Commande créée automatiquement par un bon de livraison (vente directe ou import des BL Excel). */
+  const isFromDelivery = (c: Command) =>
+    c.notes === 'Commande directe — livraison' || c.createdBy === 'import_excel';
+
   const filteredCommands = useMemo(() => {
     return commands.filter((c) => {
+      // seules les commandes saisies sur cet écran : pas celles nées d'un bon de livraison
+      if (isFromDelivery(c)) return false;
       // les anciennes commandes vivent dans leur propre onglet
       if (scope === 'historical' ? !c.isHistorical : !!c.isHistorical) return false;
       const q = search.toLowerCase();

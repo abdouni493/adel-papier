@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   FlaskConical, Plus, Eye, Trash2, Search, X, Clock, User, Pencil, FileText,
   BookOpen, AlertTriangle, Printer, Factory, Coins, TrendingUp, PackageCheck,
-  CreditCard, Receipt, Truck, ImagePlus, Tags, Box,
+  CreditCard, Receipt, ImagePlus, Tags, Box, PackagePlus, FolderCog, Check,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SearchBar } from '@/components/ui/SearchBar';
@@ -107,30 +107,37 @@ export default function ProductionPage() {
       settings
     );
 
+  /** Historique de l'écran : seuls les lots lancés ici (ni caisse, ni bons de livraison). */
+  const manualProductions = useMemo(
+    () => productions.filter((p) => (p.origin ?? 'manual') === 'manual'),
+    [productions]
+  );
+
   // KPI de l'onglet Productions
   const prodStats = useMemo(() => {
-    const cost = productions.reduce((sum, x) => sum + (x.totalCost ?? 0), 0);
-    const value = productions.reduce((sum, x) => sum + x.totalValue, 0);
+    const cost = manualProductions.reduce((sum, x) => sum + (x.totalCost ?? 0), 0);
+    const value = manualProductions.reduce((sum, x) => sum + x.totalValue, 0);
     // stock prêt : produit fini ni livré ni mis au comptoir (tous produits)
     let remaining = 0;
     readyMap.forEach((v) => { remaining += Math.max(0, v); });
-    const loss = productions.reduce((sum, x) => sum + (x.lossValue ?? 0), 0);
+    const loss = manualProductions.reduce((sum, x) => sum + (x.lossValue ?? 0), 0);
     return { cost, value, remaining, loss, gains: value - cost };
-  }, [productions, readyMap]);
+  }, [manualProductions, readyMap]);
 
   const [activeTab, setActiveTab] = useState<'productions' | 'fiche_technics'>('productions');
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
-  // manuelle (écran Production) ou lancée depuis le point de vente
   // Affichage en TABLEAU par defaut, comme sur tous les ecrans.
   const [view, setView] = useViewMode('production');
-  const [originFilter, setOriginFilter] = useState<'all' | 'manual' | 'pos' | 'delivery'>('all');
   
   // Production Modals
   const [prodCreateOpen, setProdCreateOpen] = useState(false);
   const [prodViewing, setProdViewing] = useState<Production | null>(null);
   const [prodDeleteId, setProdDeleteId] = useState<string | null>(null);
   const [transferProd, setTransferProd] = useState<Production | null>(null);
+  const [prodEditing, setProdEditing] = useState<Production | null>(null);
+  const [prodAdding, setProdAdding] = useState<Production | null>(null);
+  const [catManagerOpen, setCatManagerOpen] = useState(false);
 
   // Fiche Technic Modals
   const [ftCreateOpen, setFtCreateOpen] = useState(false);
@@ -141,19 +148,12 @@ export default function ProductionPage() {
   // Filter productions
   const filteredProductions = useMemo(
     () =>
-      productions.filter(
+      manualProductions.filter(
         (p) =>
-          (p.name.toLowerCase().includes(search.toLowerCase()) ||
-            (p.saleReference || '').toLowerCase().includes(search.toLowerCase())) &&
-          matchesDateFilter(p.date, dateFilter) &&
-          (originFilter === 'all' || (p.origin ?? 'manual') === originFilter)
+          p.name.toLowerCase().includes(search.toLowerCase()) &&
+          matchesDateFilter(p.date, dateFilter)
       ),
-    [productions, search, dateFilter, originFilter]
-  );
-
-  const posCount = useMemo(
-    () => productions.filter((p) => p.origin === 'pos').length,
-    [productions]
+    [manualProductions, search, dateFilter]
   );
 
   // Filter Fiche Technics
@@ -171,8 +171,6 @@ export default function ProductionPage() {
       render: (p) => (
         <span className="flex items-center gap-1.5 font-semibold">
           {p.name}
-          {p.origin === 'pos' && <Badge variant="success" className="text-[9px]">Caisse</Badge>}
-          {p.origin === 'delivery' && <Badge variant="warning" className="text-[9px]">Livraison</Badge>}
           {p.hasLoss && <Badge variant="danger" className="text-[9px]">Perte</Badge>}
           {p.boxProductId && <Badge variant="info" className="text-[9px]">{p.boxProductName ?? 'Boîte'}</Badge>}
         </span>
@@ -207,15 +205,21 @@ export default function ProductionPage() {
     return Math.max(0, Math.min(rest, free));
   };
 
+  /** Baisse maximale d'un lot : ce qui en reste dans le stock prêt (le reste est déjà livré ou vendu). */
+  const maxDecreaseOf = (p: Production) =>
+    p.ficheTechnicId ? Math.max(0, readyMap.get(p.ficheTechnicId) ?? 0) : p.outputQuantity;
+
   const productionActions = (p: Production): ActionItem[] => [
     { label: 'Détails', icon: <Eye size={15} />, onClick: () => setProdViewing(p) },
+    { label: 'Modifier', icon: <Pencil size={15} />, hidden: !can('production', 'edit'), onClick: () => setProdEditing(p) },
+    { label: 'Augmenter la quantité', icon: <PackagePlus size={15} />, hidden: !can('production', 'edit'),
+      onClick: () => setProdAdding(p) },
     { label: 'Mettre au comptoir', icon: <Plus size={15} />,
       hidden: !can('production', 'edit') || transferableOf(p) <= 0,
       onClick: () => setTransferProd(p) },
     { label: 'Imprimer la fiche', icon: <Printer size={15} />, onClick: () => printProduction(p) },
     { label: 'Supprimer', icon: <Trash2 size={15} />, danger: true,
-      // une production automatique appartient à son bon de livraison
-      hidden: !can('production', 'delete') || p.origin === 'delivery',
+      hidden: !can('production', 'delete'),
       onClick: () => setProdDeleteId(p.id) },
   ];
 
@@ -224,7 +228,7 @@ export default function ProductionPage() {
       <PageHeader 
         title={t('production')} 
         icon={<FlaskConical size={24} />} 
-        subtitle={`${productions.length} productions, ${ficheTechnics.length} fiches techniques`}
+        subtitle={`${manualProductions.length} productions, ${ficheTechnics.length} fiches techniques`}
         actions={
           <div className="flex gap-2">
             {activeTab === 'productions' ? (
@@ -235,6 +239,11 @@ export default function ProductionPage() {
               )
             ) : (
               <>
+                {can('production', 'edit') && (
+                  <Button variant="secondary" onClick={() => setCatManagerOpen(true)}>
+                    <FolderCog size={18} /> Gérer les catégories
+                  </Button>
+                )}
                 <Button variant="secondary" onClick={() => setPriceListOpen(true)} disabled={ficheTechnics.length === 0}>
                   <Tags size={18} /> Imprimer la liste des prix
                 </Button>
@@ -288,17 +297,6 @@ export default function ProductionPage() {
             <div className="flex-1 min-w-[200px]"><SearchBar value={search} onChange={setSearch} placeholder={t('search')} /></div>
             <Select value={dateFilter} onChange={(e) => setDateFilter(e.target.value as DateFilter)}
               options={[{ value: 'all', label: t('all') }, { value: 'today', label: t('today') }, { value: 'week', label: t('week') }, { value: 'month', label: t('month') }]} className="max-w-[180px]" />
-            <Select
-              value={originFilter}
-              onChange={(e) => setOriginFilter(e.target.value as 'all' | 'manual' | 'pos' | 'delivery')}
-              options={[
-                { value: 'all', label: 'Toutes les origines' },
-                { value: 'manual', label: 'Lancées manuellement' },
-                { value: 'pos', label: `Issues du point de vente (${posCount})` },
-                { value: 'delivery', label: `Automatiques (livraisons) (${productions.filter((p) => p.origin === 'delivery').length})` },
-              ]}
-              className="max-w-[240px]"
-            />
             <ViewToggle view={view} onChange={setView} />
           </div>
 
@@ -330,12 +328,6 @@ export default function ProductionPage() {
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
-                      {p.origin === 'pos' && (
-                        <Badge variant="success" className="gap-1"><CreditCard size={10} /> Point de vente</Badge>
-                      )}
-                      {p.origin === 'delivery' && (
-                        <Badge variant="warning" className="gap-1"><Truck size={10} /> Auto · livraison</Badge>
-                      )}
                       {p.categoryName && <Badge variant="info">{p.categoryName}</Badge>}
                       {p.boxProductId && (
                         <Badge variant="info" className="gap-1">
@@ -438,6 +430,17 @@ export default function ProductionPage() {
                       </Button>
                     )}
 
+                    {can('production', 'edit') && (
+                      <div className="grid grid-cols-2 gap-1.5 mb-2">
+                        <Button size="sm" variant="secondary" className="text-xs" onClick={() => setProdEditing(p)}>
+                          <Pencil size={13} /> Modifier
+                        </Button>
+                        <Button size="sm" variant="secondary" className="text-xs" onClick={() => setProdAdding(p)}>
+                          <PackagePlus size={13} /> Augmenter
+                        </Button>
+                      </div>
+                    )}
+
                     <div className="flex gap-1.5 mt-auto pt-2 border-t border-gold/10">
                       <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={() => setProdViewing(p)}>
                         <Eye size={13} /> Détails
@@ -445,7 +448,7 @@ export default function ProductionPage() {
                       <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={() => printProduction(p)}>
                         <Printer size={13} /> Imprimer
                       </Button>
-                      {can('production', 'delete') && p.origin !== 'delivery' && (
+                      {can('production', 'delete') && (
                         <Button size="sm" variant="ghost" onClick={() => setProdDeleteId(p.id)} title="Supprimer">
                           <Trash2 size={13} className="text-rose-deep" />
                         </Button>
@@ -466,58 +469,104 @@ export default function ProductionPage() {
           {filteredFicheTechnics.length === 0 ? <EmptyState message="Aucune fiche technique enregistrée" /> : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredFicheTechnics.map((ft, i) => (
-                <Card key={ft.id} index={i} hoverable className="flex flex-col border border-gold/10 hover:border-gold/30 bg-gradient-to-br from-white to-vanilla/5">
-                  {ft.imageUrl && (
-                    <img src={ft.imageUrl} alt={ft.name} className="-mx-5 -mt-5 mb-3 h-36 w-[calc(100%+2.5rem)] max-w-none object-cover rounded-t-xl border-b border-gold/10" />
-                  )}
-                  <div className="flex justify-between items-start mb-1 gap-2">
-                    <h3 className="font-display font-semibold text-text-primary text-base">{ft.name}</h3>
-                    <Badge variant="warning" className="bg-caramel/10 text-caramel border-0">{ft.categoryName}</Badge>
-                  </div>
-                  <p className="text-[10px] text-text-muted mb-2">Créé le {formatDate(ft.createdAt, language)}</p>
-                  {ft.description && <p className="text-xs text-text-muted mb-3 line-clamp-2">{ft.description}</p>}
-                  
-                  <div className="bg-vanilla/40 rounded-xl p-3 space-y-1.5 text-xs mb-3">
-                    <div className="flex justify-between"><span className="text-text-muted">Stock prêt (non livré)</span><span className="tabular font-bold text-pistachio">{Math.max(0, readyMap.get(ft.id) ?? 0)}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span></div>
-                    {(() => {
-                      const variants = readyVariantsOf(readyBoxMap, ft.id, namesOfBoxes);
-                      if (variants.length < 2 && !variants.some((v) => v.boxId)) return null;
-                      return variants.map((v) => (
-                        <div key={v.boxId || 'none'} className="flex justify-between pl-3 text-[11px]">
-                          <span className="flex items-center gap-1 text-text-muted"><Box size={10} /> {v.boxName}</span>
-                          <span className="tabular text-pistachio">{v.ready}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span>
-                        </div>
-                      ));
-                    })()}
-                    <div className="flex justify-between"><span className="text-text-muted">Ingrédients</span><span className="tabular text-text-secondary">{ft.usedProducts.length}</span></div>
-                    <div className="flex justify-between"><span className="text-text-muted">Rendement base</span><span className="tabular font-medium text-text-primary">{ft.outputQuantity}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span></div>
-                    <div className="flex justify-between"><span className="text-text-muted">Coût base total</span><span className="tabular text-rose-deep font-semibold">{formatCurrency(ft.totalCost)}</span></div>
-                    <div className="flex justify-between"><span className="text-text-muted">Coût par unité</span><span className="tabular text-rose-deep font-bold bg-rose-deep/5 px-1.5 py-0.5 rounded">{formatCurrency(ft.costPerUnit)}</span></div>
-                    <div className="flex justify-between border-t border-gold/5 pt-1.5 mt-1.5"><span className="text-text-muted">Gain par unité</span><span className="tabular text-pistachio font-bold">{formatCurrency(ft.gainsPerUnit)}</span></div>
-                    <div className="flex justify-between"><span className="text-text-muted font-semibold">Total Gains base</span><span className="tabular text-pistachio font-bold bg-pistachio/5 px-1.5 py-0.5 rounded">{formatCurrency(ft.totalGains)}</span></div>
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-1.5 mb-3">
-                    {ft.sellByUnit && (
-                      <Badge variant="info" className="bg-pistachio/15 text-pistachio hover:bg-pistachio/20 border-0 self-start text-[10px]">
-                        Unité de détail: {ft.sellUnit}
-                      </Badge>
+                <Card key={ft.id} index={i} hoverable
+                  className="flex flex-col p-0 overflow-hidden rounded-2xl border border-black/[0.07] dark:border-white/[0.08] bg-white dark:bg-[#1c1c20] hover:border-gold/40 dark:hover:border-gold/50">
+                  {/* En-tête : photo ou monogramme */}
+                  <div className="relative h-32 shrink-0 overflow-hidden bg-gradient-to-br from-gold/15 via-caramel/10 to-transparent dark:from-gold/25 dark:via-[#26262b] dark:to-[#1c1c20]">
+                    {ft.imageUrl ? (
+                      <img src={ft.imageUrl} alt={ft.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <span className="font-display text-5xl font-bold text-gold-dark/30 dark:text-gold/25 select-none">
+                          {ft.name.trim().charAt(0).toUpperCase()}
+                        </span>
+                      </div>
                     )}
-                    {ft.usableInProduction && (
-                      <Badge variant="info" className="bg-caramel/15 text-caramel hover:bg-caramel/20 border-0 self-start text-[10px]">
-                        Réutilisable{ft.productUnit ? ` (${ft.productUnit})` : ''}
-                      </Badge>
-                    )}
+                    <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 to-transparent" />
+                    <span className="absolute top-2.5 left-2.5 rounded-full bg-white/90 dark:bg-black/60 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gold-dark dark:text-gold-light backdrop-blur">
+                      {ft.categoryName || 'Sans catégorie'}
+                    </span>
+                    <div className="absolute bottom-2 left-3 right-3">
+                      <h3 className="font-display font-semibold text-white text-base leading-tight truncate drop-shadow">{ft.name}</h3>
+                      <p className="text-[10px] text-white/75">Créé le {formatDate(ft.createdAt, language)}</p>
+                    </div>
                   </div>
 
-                  <div className="flex gap-2 mt-auto pt-2 border-t border-gold/5">
-                    <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={() => setFtViewing(ft)}><Eye size={13} /> {t('view')}</Button>
-                    {can('production', 'edit') && (
-                      <Button size="sm" variant="secondary" className="px-2.5" onClick={() => setFtEditing(ft)} title={t('edit')}><Pencil size={13} /></Button>
+                  <div className="p-4 flex-1 flex flex-col gap-3">
+                    {ft.description && <p className="text-xs text-text-muted line-clamp-2">{ft.description}</p>}
+
+                    {/* Stock prêt */}
+                    <div className="rounded-xl border border-pistachio/25 bg-pistachio/[0.07] dark:bg-pistachio/10 px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-text-secondary"><PackageCheck size={13} className="text-pistachio" /> Stock prêt</span>
+                        <span className="tabular text-lg font-extrabold text-pistachio leading-none">
+                          {Math.max(0, readyMap.get(ft.id) ?? 0)}
+                          <span className="text-[11px] font-semibold ml-1">{ft.sellByUnit && ft.sellUnit ? ft.sellUnit : ''}</span>
+                        </span>
+                      </div>
+                      {(() => {
+                        const variants = readyVariantsOf(readyBoxMap, ft.id, namesOfBoxes);
+                        if (variants.length < 2 && !variants.some((v) => v.boxId)) return null;
+                        return (
+                          <div className="mt-1.5 space-y-0.5 border-t border-pistachio/15 pt-1.5">
+                            {variants.map((v) => (
+                              <div key={v.boxId || 'none'} className="flex justify-between text-[11px]">
+                                <span className="flex items-center gap-1 text-text-muted"><Box size={10} /> {v.boxName}</span>
+                                <span className="tabular font-semibold text-pistachio">{v.ready}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Chiffres clés */}
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="rounded-xl bg-black/[0.03] dark:bg-white/[0.04] px-1.5 py-2">
+                        <p className="text-[9px] uppercase tracking-wide text-text-muted">Prix</p>
+                        <p className="text-xs font-bold tabular text-gold-dark dark:text-gold-light">{formatCurrency(ft.unitPrice)}</p>
+                      </div>
+                      <div className="rounded-xl bg-rose-deep/[0.06] dark:bg-rose-deep/15 px-1.5 py-2">
+                        <p className="text-[9px] uppercase tracking-wide text-text-muted">Coût / u.</p>
+                        <p className="text-xs font-bold tabular text-rose-deep dark:text-rose">{formatCurrency(ft.costPerUnit)}</p>
+                      </div>
+                      <div className="rounded-xl bg-pistachio/[0.08] dark:bg-pistachio/15 px-1.5 py-2">
+                        <p className="text-[9px] uppercase tracking-wide text-text-muted">Gain / u.</p>
+                        <p className={`text-xs font-bold tabular ${ft.gainsPerUnit >= 0 ? 'text-pistachio' : 'text-rose-deep'}`}>{formatCurrency(ft.gainsPerUnit)}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 text-xs">
+                      <div className="flex justify-between"><span className="text-text-muted">Rendement de base</span><span className="tabular font-semibold text-text-primary">{ft.outputQuantity}{ft.sellByUnit && ft.sellUnit ? ` ${ft.sellUnit}` : ''}</span></div>
+                      <div className="flex justify-between"><span className="text-text-muted">Ingrédients</span><span className="tabular font-semibold text-text-primary">{ft.usedProducts.length}</span></div>
+                      <div className="flex justify-between"><span className="text-text-muted">Coût de base</span><span className="tabular font-semibold text-rose-deep dark:text-rose">{formatCurrency(ft.totalCost)}</span></div>
+                      <div className="flex justify-between"><span className="text-text-muted">Gains de base</span><span className="tabular font-bold text-pistachio">{formatCurrency(ft.totalGains)}</span></div>
+                    </div>
+
+                    {(ft.sellByUnit || ft.usableInProduction) && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {ft.sellByUnit && (
+                          <span className="rounded-full border border-pistachio/30 bg-pistachio/10 px-2 py-0.5 text-[10px] font-semibold text-pistachio">
+                            Détail : {ft.sellUnit}
+                          </span>
+                        )}
+                        {ft.usableInProduction && (
+                          <span className="rounded-full border border-caramel/30 bg-caramel/10 px-2 py-0.5 text-[10px] font-semibold text-caramel">
+                            Réutilisable{ft.productUnit ? ` (${ft.productUnit})` : ''}
+                          </span>
+                        )}
+                      </div>
                     )}
-                    {can('production', 'delete') && (
-                      <Button size="sm" variant="ghost" onClick={() => setFtDeleteId(ft.id)} className="px-2.5 hover:bg-rose-deep/5"><Trash2 size={13} className="text-rose-deep" /></Button>
-                    )}
+
+                    <div className="flex gap-2 mt-auto pt-3 border-t border-black/[0.06] dark:border-white/[0.07]">
+                      <Button size="sm" variant="secondary" className="flex-1 text-xs" onClick={() => setFtViewing(ft)}><Eye size={13} /> {t('view')}</Button>
+                      {can('production', 'edit') && (
+                        <Button size="sm" variant="secondary" className="px-2.5" onClick={() => setFtEditing(ft)} title={t('edit')}><Pencil size={13} /></Button>
+                      )}
+                      {can('production', 'delete') && (
+                        <Button size="sm" variant="ghost" onClick={() => setFtDeleteId(ft.id)} className="px-2.5 hover:bg-rose-deep/10"><Trash2 size={13} className="text-rose-deep" /></Button>
+                      )}
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -658,6 +707,24 @@ export default function ProductionPage() {
 
       <PriceListDialog open={priceListOpen} onClose={() => setPriceListOpen(false)} />
 
+      <Modal open={!!prodEditing} onClose={() => setProdEditing(null)} title="Modifier la production" size="md">
+        {prodEditing && (
+          <EditProductionModal
+            production={prodEditing}
+            maxDecrease={maxDecreaseOf(prodEditing)}
+            onClose={() => setProdEditing(null)}
+          />
+        )}
+      </Modal>
+
+      <Modal open={!!prodAdding} onClose={() => setProdAdding(null)} title="Augmenter la quantité" size="md">
+        {prodAdding && <AddQuantityModal production={prodAdding} onClose={() => setProdAdding(null)} />}
+      </Modal>
+
+      <Modal open={catManagerOpen} onClose={() => setCatManagerOpen(false)} title="Catégories des fiches techniques" size="md">
+        <FicheCategoryManager />
+      </Modal>
+
       {/* Transfer to Comptoir Modal */}
       <Modal open={!!transferProd} onClose={() => setTransferProd(null)} title="Mettre au comptoir" size="sm">
         {transferProd && (
@@ -757,6 +824,242 @@ function TransferToComptoirModal({ production, maxQuantity, onClose }: {
           Mettre au comptoir
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** Modifier un lot : quantité (matières redosées), date, heure, prix, description. */
+function EditProductionModal({ production, maxDecrease, onClose }: {
+  production: Production; maxDecrease: number; onClose: () => void;
+}) {
+  const { t } = useLanguage();
+  const rescaleProduction = useProductionStore((s) => s.rescaleProduction);
+  const [quantity, setQuantity] = useState<number>(production.outputQuantity);
+  const [date, setDate] = useState(production.date);
+  const [hour, setHour] = useState(production.hour ?? '');
+  const [unitPrice, setUnitPrice] = useState<number>(production.unitPrice);
+  const [description, setDescription] = useState(production.description ?? '');
+  const [lossDescription, setLossDescription] = useState(production.lossDescription ?? '');
+  const [saving, setSaving] = useState(false);
+  const su = production.sellByUnit && production.sellUnit ? ` ${production.sellUnit}` : '';
+  const minQuantity = Math.max(production.sentToComptoir ?? 0, production.outputQuantity - maxDecrease);
+  const factor = production.outputQuantity > 0 ? quantity / production.outputQuantity : 1;
+
+  const handleSave = async () => {
+    if (quantity <= 0) { toast.error('La quantité doit être supérieure à 0'); return; }
+    if (quantity < minQuantity) {
+      toast.error(`Une partie du lot est déjà livrée, vendue ou au comptoir : minimum ${minQuantity}${su}`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await rescaleProduction(production.id, Number(quantity), {
+        date, hour, unitPrice: Number(unitPrice), description: description.trim(),
+        lossDescription: production.hasLoss ? lossDescription.trim() : undefined,
+      });
+      toast.success('Production modifiée');
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message || 'Une erreur est survenue');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-gold/15 bg-vanilla/30 px-3 py-2 text-xs text-text-secondary">
+        <span className="font-semibold text-text-primary">{production.name}</span> — produit : {production.outputQuantity}{su}
+        {(production.sentToComptoir ?? 0) > 0 && <> · au comptoir : {production.sentToComptoir}{su}</>}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Input label={`Quantité produite${su ? ` (${su.trim()})` : ''}`} type="number" step="any" min={minQuantity}
+          value={quantity} onChange={(e) => setQuantity(Math.max(0, Number(e.target.value)))} />
+        <Input label="Prix de vente unitaire" type="number" step="any" value={unitPrice}
+          onChange={(e) => setUnitPrice(Number(e.target.value))} />
+        <Input label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <Input label="Heure" type="time" value={hour} onChange={(e) => setHour(e.target.value)} />
+      </div>
+      <Textarea label="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+      {production.hasLoss && (
+        <Textarea label={t('lossDescriptionLabel')} value={lossDescription} onChange={(e) => setLossDescription(e.target.value)} rows={2} />
+      )}
+      {factor !== 1 && <MaterialsPreview production={production} factor={factor} />}
+      <div className="flex justify-end gap-3 border-t border-gold/10 pt-4">
+        <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
+        <Button variant="gold" onClick={handleSave} disabled={saving || quantity < minQuantity || quantity <= 0}>
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Produire davantage du même lot : les matières de la quantité ajoutée sortent du stock. */
+function AddQuantityModal({ production, onClose }: { production: Production; onClose: () => void }) {
+  const { t } = useLanguage();
+  const rescaleProduction = useProductionStore((s) => s.rescaleProduction);
+  const [extra, setExtra] = useState<number>(0);
+  const [saving, setSaving] = useState(false);
+  const su = production.sellByUnit && production.sellUnit ? ` ${production.sellUnit}` : '';
+  const factor = production.outputQuantity > 0 ? (production.outputQuantity + extra) / production.outputQuantity : 1;
+
+  const handleSave = async () => {
+    if (extra <= 0) { toast.error('La quantité à ajouter doit être supérieure à 0'); return; }
+    setSaving(true);
+    try {
+      await rescaleProduction(production.id, production.outputQuantity + Number(extra));
+      toast.success(`+${extra}${su} ajouté(s) à la production — matières déduites du stock`);
+      onClose();
+    } catch (e: any) {
+      toast.error(e.message || 'Une erreur est survenue');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-2">
+        <Tile label="Quantité actuelle" value={`${production.outputQuantity}${su}`} />
+        <Tile label="Ajout" value={`+${extra || 0}${su}`} />
+        <Tile label="Nouvelle quantité" value={`${production.outputQuantity + (extra || 0)}${su}`} />
+      </div>
+      <Input label={`Quantité à ajouter${su ? ` (${su.trim()})` : ''}`} type="number" step="any" min={0} autoFocus
+        value={extra || ''} onChange={(e) => setExtra(Math.max(0, Number(e.target.value)))} />
+      {extra > 0 && <MaterialsPreview production={production} factor={factor} />}
+      <div className="flex justify-end gap-3 border-t border-gold/10 pt-4">
+        <Button variant="secondary" onClick={onClose}>{t('cancel')}</Button>
+        <Button variant="gold" onClick={handleSave} disabled={saving || extra <= 0}>
+          <PackagePlus size={16} /> {saving ? 'Enregistrement…' : 'Ajouter à la production'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Écart de matières qu'entraîne la nouvelle quantité (sortie ou retour en stock). */
+function MaterialsPreview({ production, factor }: { production: Production; factor: number }) {
+  const products = useStockStore((s) => s.products);
+  const lines = production.usedProducts.filter((u) => !u.isBox);
+  if (lines.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-gold/15 overflow-hidden">
+      <table className="w-full text-xs">
+        <thead className="bg-vanilla/60 text-text-secondary"><tr>
+          <th className="text-left px-3 py-2">Matière</th>
+          <th className="text-right px-3 py-2">Écart</th>
+          <th className="text-right px-3 py-2">En stock</th>
+        </tr></thead>
+        <tbody>
+          {lines.map((u, i) => {
+            const delta = Number((u.quantityUsed * factor - u.quantityUsed).toFixed(4));
+            const stock = u.sourceType === 'fiche' ? undefined : products.find((p) => p.id === u.productId);
+            const short = !!stock && delta > stock.currentQuantity + 0.0005;
+            return (
+              <tr key={i} className="border-t border-gold/10">
+                <td className="px-3 py-1.5 font-medium text-text-primary">{u.productName}</td>
+                <td className={`px-3 py-1.5 text-right tabular font-bold ${delta > 0 ? 'text-rose-deep' : 'text-pistachio'}`}>
+                  {delta > 0 ? '−' : '+'}{Math.abs(delta)}{u.unit ? ` ${u.unit}` : ''}
+                </td>
+                <td className={`px-3 py-1.5 text-right tabular ${short ? 'text-rose-deep font-bold' : 'text-text-muted'}`}>
+                  {stock ? `${stock.currentQuantity}${u.unit ? ` ${u.unit}` : ''}` : '—'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Renommer ou supprimer les catégories des fiches techniques. */
+function FicheCategoryManager() {
+  const { t } = useLanguage();
+  const { can } = usePermissions();
+  const { categories, ficheTechnics, addCategory, renameCategory, deleteCategory } = useFicheTechnicStore();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [newName, setNewName] = useState('');
+  const [toDelete, setToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const countOf = (id: string) => ficheTechnics.filter((f) => f.categoryId === id).length;
+
+  const saveRename = async () => {
+    const name = draft.trim();
+    if (!editingId || !name) return;
+    if (categories.some((c) => c.id !== editingId && c.name.toLowerCase() === name.toLowerCase())) {
+      toast.error('Une catégorie porte déjà ce nom');
+      return;
+    }
+    await renameCategory(editingId, name);
+    toast.success('Catégorie renommée');
+    setEditingId(null);
+  };
+
+  const add = async () => {
+    if (!newName.trim()) return;
+    await addCategory(newName.trim());
+    setNewName('');
+    toast.success('Catégorie ajoutée');
+  };
+
+  return (
+    <div className="space-y-4">
+      {can('production', 'create') && (
+        <div className="flex items-end gap-2">
+          <Input label="Nouvelle catégorie" value={newName} onChange={(e) => setNewName(e.target.value)} className="flex-1"
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void add(); } }} />
+          <Button variant="gold" onClick={add} disabled={!newName.trim()}><Plus size={16} /> {t('add')}</Button>
+        </div>
+      )}
+
+      {categories.length === 0 ? (
+        <EmptyState message="Aucune catégorie" />
+      ) : (
+        <ul className="divide-y divide-gold/10 rounded-xl border border-gold/15 overflow-hidden max-h-[420px] overflow-y-auto">
+          {categories.map((c) => (
+            <li key={c.id} className="flex items-center gap-2 px-3 py-2.5 bg-[--surface-dropdown]">
+              {editingId === c.id ? (
+                <>
+                  <Input value={draft} onChange={(e) => setDraft(e.target.value)} autoFocus className="flex-1"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); void saveRename(); }
+                      if (e.key === 'Escape') setEditingId(null);
+                    }} />
+                  <Button size="icon" variant="gold" onClick={saveRename} title="Enregistrer"><Check size={15} /></Button>
+                  <Button size="icon" variant="secondary" onClick={() => setEditingId(null)} title={t('cancel')}><X size={15} /></Button>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-text-primary truncate">{c.name}</p>
+                    <p className="text-[11px] text-text-muted">{countOf(c.id)} fiche(s)</p>
+                  </div>
+                  <Button size="icon" variant="secondary" title={t('edit')}
+                    onClick={() => { setEditingId(c.id); setDraft(c.name); }}><Pencil size={14} /></Button>
+                  {can('production', 'delete') && (
+                    <Button size="icon" variant="ghost" title="Supprimer" onClick={() => setToDelete({ id: c.id, name: c.name })}>
+                      <Trash2 size={14} className="text-rose-deep" />
+                    </Button>
+                  )}
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ConfirmDialog open={!!toDelete} onClose={() => setToDelete(null)}
+        onConfirm={() => {
+          if (!toDelete) return;
+          void deleteCategory(toDelete.id).then(() => toast.success('Catégorie supprimée'));
+        }}
+        title="Supprimer la catégorie"
+        message={toDelete && countOf(toDelete.id) > 0
+          ? `« ${toDelete.name} » est utilisée par ${countOf(toDelete.id)} fiche(s), qui resteront sans catégorie. Continuer ?`
+          : `Voulez-vous supprimer « ${toDelete?.name} » ?`} />
     </div>
   );
 }

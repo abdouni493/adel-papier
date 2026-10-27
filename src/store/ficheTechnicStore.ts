@@ -69,6 +69,7 @@ interface FicheTechnicState {
   updateFicheTechnic: (id: string, data: Partial<FicheTechnic>) => Promise<void>;
   deleteFicheTechnic: (id: string) => Promise<void>;
   addCategory: (name: string) => Promise<Category>;
+  renameCategory: (id: string, name: string) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
 }
 
@@ -106,6 +107,14 @@ export const useFicheTechnicStore = create<FicheTechnicState>()(stable((set, get
     const row = await save('ficheCategories.create', () => db.ficheCategories.create(name));
     set({ categories: [...get().categories, row] });
     return row;
+  },
+
+  renameCategory: async (id, name) => {
+    const row = await save('ficheCategories.rename', () => db.ficheCategories.rename(id, name));
+    set({
+      categories: get().categories.map((c) => (c.id === id ? row : c)),
+      ficheTechnics: get().ficheTechnics.map((f) => (f.categoryId === id ? { ...f, categoryName: name } : f)),
+    });
   },
 
   deleteCategory: async (id) => {

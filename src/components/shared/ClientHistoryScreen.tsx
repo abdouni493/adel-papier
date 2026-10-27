@@ -269,7 +269,7 @@ export function ClientHistoryScreen({
         bonNumber: c?.bonNumber,
         clientName: client.name,
         clientPhone: client.phone,
-        clientAddress: c?.clientAddress ?? client.address,
+        clientAddress: c?.clientAddress || client.address,
         clientRc: client.rc, clientNif: client.nif, clientNis: client.nis, clientArticle: client.article,
         location: d.location || c?.clientAddress,
         historical: d.isHistorical,

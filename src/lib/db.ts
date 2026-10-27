@@ -984,6 +984,11 @@ export const db = {
       const { error } = await supabase.from('command_items').insert(rows);
       if (error) throw new Error(`[command_items] ${error.message}`);
     },
+    /** Nouveau prix unitaire d'une ligne (les totaux sont recalculés au rebuild du bon). */
+    setItemPrice: async (itemId: string, unitPrice: number) => {
+      const { error } = await supabase.from('command_items').update({ unit_price: unitPrice }).eq('id', itemId);
+      if (error) throw new Error(`[command_items] ${error.message}`);
+    },
     remove: (id: string) => remove('commands', id),
   },
 
@@ -993,6 +998,19 @@ export const db = {
       (await select<any>('productions', '*, production_used_products(*)', 'date')).map(toProduction),
     update: (id: string, data: Record<string, any>) => update('productions', id, data),
     remove: (id: string) => remove('productions', id),
+    /**
+     * Remplace les matières (hors boîte) d'un lot : le déclencheur
+     * production_used_trg rend l'ancienne consommation au stock puis déduit la nouvelle.
+     */
+    replaceUsedProducts: async (id: string, lines: Record<string, any>[]) => {
+      const { error: delError } = await supabase.from('production_used_products')
+        .delete().eq('production_id', id).or('is_box.is.null,is_box.eq.false');
+      if (delError) throw new Error(`[production_used_products] ${delError.message}`);
+      if (lines.length === 0) return;
+      const { error } = await supabase.from('production_used_products')
+        .insert(lines.map((l) => ({ ...l, production_id: id })));
+      if (error) throw new Error(`[production_used_products] ${error.message}`);
+    },
   },
   /** Contenance mémorisée de chaque boîte, par produit fini. */
   boxCapacities: {
@@ -1021,6 +1039,13 @@ export const db = {
   ficheCategories: {
     list: async (): Promise<Category[]> => (await selectOptional<any>('fiche_categories')).map(simpleName),
     create: async (name: string) => simpleName(await call<any>('upsert_fiche_category', { p_name: name })),
+    /** Renomme la catégorie et le nom recopié sur ses fiches. */
+    rename: async (id: string, name: string) => {
+      const row = simpleName(await update('fiche_categories', id, { name }));
+      const { error } = await supabase.from('fiche_technics').update({ category_name: name }).eq('category_id', id);
+      if (error) throw new Error(`[fiche_technics] ${error.message}`);
+      return row;
+    },
     remove: (id: string) => remove('fiche_categories', id),
   },
 

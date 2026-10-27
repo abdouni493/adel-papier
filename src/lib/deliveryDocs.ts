@@ -50,7 +50,7 @@ export function printDeliveryFor(
       bonNumber: command?.bonNumber,
       clientName: command?.clientName ?? client?.name ?? '',
       clientPhone: command?.clientPhone ?? client?.phone,
-      clientAddress: command?.clientAddress ?? client?.address,
+      clientAddress: command?.clientAddress || client?.address,
       ...fiscalOf(client),
       location: delivery.location || command?.clientAddress,
       historical: delivery.isHistorical ?? command?.isHistorical,

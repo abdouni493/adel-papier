@@ -12,13 +12,12 @@
 // ============================================================================
 import { useMemo, useState } from 'react';
 import {
-  Printer, ShoppingCart, Factory, Receipt, CheckSquare, Square, CalendarRange,
+  Printer, ShoppingCart, Factory, Receipt, CheckSquare, Square, CalendarRange, ChevronDown, Package,
 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Input } from '@/components/ui/Input';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { usePurchaseStore } from '@/store/purchaseStore';
 import { useSalesStore } from '@/store/salesStore';
 import { useCommandStore } from '@/store/commandStore';
@@ -55,10 +54,15 @@ interface HistSection {
   negative?: boolean;
 }
 
-const GROUPS: { id: Group; label: (k: HistoryTarget['kind']) => string; icon: typeof Factory; tone: string }[] = [
-  { id: 'in', label: (k) => (k === 'stock' ? 'Achats' : 'Production'), icon: ShoppingCart, tone: 'text-gold-dark' },
-  { id: 'used', label: (k) => (k === 'stock' ? 'Quantités utilisées' : 'Matières consommées'), icon: Factory, tone: 'text-caramel' },
-  { id: 'sales', label: () => 'Ventes', icon: Receipt, tone: 'text-pistachio' },
+/** Couleurs de chaque partie : texte, fond teinté, bordure et pastille d'icône. */
+interface Tone { text: string; soft: string; border: string; chip: string; ring: string }
+const GROUPS: { id: Group; label: (k: HistoryTarget['kind']) => string; icon: typeof Factory; tone: Tone }[] = [
+  { id: 'in', label: (k) => (k === 'stock' ? 'Achats' : 'Production'), icon: ShoppingCart,
+    tone: { text: 'text-gold-dark dark:text-gold-light', soft: 'bg-gold/[0.06] dark:bg-gold/10', border: 'border-gold/30', chip: 'bg-gold/15 text-gold-dark dark:text-gold-light', ring: 'ring-gold/50' } },
+  { id: 'used', label: (k) => (k === 'stock' ? 'Quantités utilisées' : 'Matières consommées'), icon: Factory,
+    tone: { text: 'text-caramel', soft: 'bg-caramel/[0.06] dark:bg-caramel/10', border: 'border-caramel/30', chip: 'bg-caramel/15 text-caramel', ring: 'ring-caramel/50' } },
+  { id: 'sales', label: () => 'Ventes', icon: Receipt,
+    tone: { text: 'text-pistachio', soft: 'bg-pistachio/[0.06] dark:bg-pistachio/10', border: 'border-pistachio/30', chip: 'bg-pistachio/15 text-pistachio', ring: 'ring-pistachio/50' } },
 ];
 
 const norm = (s?: string) => (s ?? '').trim().toLowerCase();
@@ -97,6 +101,9 @@ function HistoryBody({ target }: { target: HistoryTarget }) {
   const [to, setTo] = useState('');
   const [printOpen, setPrintOpen] = useState(false);
   const [printGroups, setPrintGroups] = useState<Group[]>(['in', 'used', 'sales']);
+  const [activeGroup, setActiveGroup] = useState<Group>('in');
+  /** Sections repliées à la main (les sections vides le sont d'office). */
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
 
   const inPeriod = (d: string) => !!d && matchesDateFilter(dayOf(d), period, from, to);
   const supplierName = (id?: string) => suppliers.find((s) => s.id === id)?.name ?? '—';
@@ -395,118 +402,145 @@ function HistoryBody({ target }: { target: HistoryTarget }) {
     setPrintOpen(false);
   };
 
+  const active = GROUPS.find((g) => g.id === activeGroup) ?? GROUPS[0];
+  const activeSections = sections.filter((s) => s.group === active.id);
+
   return (
     <div className="space-y-5">
-      {/* Filtre de période + impression */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex items-center gap-2 text-text-secondary text-sm font-semibold"><CalendarRange size={18} className="text-gold" /> Période</div>
-        <Select
-          value={period}
-          onChange={(e) => setPeriod(e.target.value as DateFilter)}
-          options={[
-            { value: 'all', label: 'Toutes les périodes' },
-            { value: 'today', label: "Aujourd'hui" },
-            { value: 'week', label: '7 derniers jours' },
-            { value: 'month', label: 'Ce mois' },
-            { value: 'custom', label: 'Personnalisée' },
-          ]}
-          className="max-w-[200px]"
-        />
-        {period === 'custom' && (
-          <>
-            <Input label="Du" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="max-w-[170px]" />
-            <Input label="Au" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="max-w-[170px]" />
-          </>
-        )}
-        <div className="ml-auto">
-          <Button variant="gold" onClick={() => setPrintOpen(true)}><Printer size={16} /> Imprimer le rapport</Button>
+      {/* Résumé du produit + période + impression */}
+      <div className="rounded-2xl border border-black/[0.07] dark:border-white/[0.08] bg-vanilla/50 p-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="h-11 w-11 shrink-0 rounded-xl bg-gold/15 text-gold-dark dark:text-gold-light flex items-center justify-center">
+            <Package size={20} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[11px] uppercase tracking-wide text-text-muted">
+              {target.kind === 'stock' ? 'Produit de stock' : `Produit de production${target.fiche.categoryName ? ` · ${target.fiche.categoryName}` : ''}`}
+            </p>
+            <p className="text-sm text-text-secondary">
+              {target.kind === 'stock' ? (
+                <>Stock actuel <b className="tabular text-text-primary">{qty(target.product.currentQuantity, unit)}</b> · Prix d'achat <b className="tabular text-text-primary">{formatCurrency(target.product.purchasePrice)}</b></>
+              ) : (
+                <>Prix de vente <b className="tabular text-text-primary">{formatCurrency(target.fiche.unitPrice)}</b> · Coût / unité <b className="tabular text-text-primary">{formatCurrency(target.fiche.costPerUnit)}</b></>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="ml-auto flex flex-wrap items-end gap-2">
+          <div className="flex items-center gap-1.5 self-center text-text-secondary text-xs font-semibold"><CalendarRange size={16} className="text-gold" /> Période</div>
+          <Select
+            value={period}
+            onChange={(e) => setPeriod(e.target.value as DateFilter)}
+            options={[
+              { value: 'all', label: 'Toutes les périodes' },
+              { value: 'today', label: "Aujourd'hui" },
+              { value: 'week', label: '7 derniers jours' },
+              { value: 'month', label: 'Ce mois' },
+              { value: 'custom', label: 'Personnalisée' },
+            ]}
+            className="w-[180px]"
+          />
+          {period === 'custom' && (
+            <>
+              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-[150px]" />
+              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-[150px]" />
+            </>
+          )}
+          <Button variant="gold" onClick={() => setPrintOpen(true)}><Printer size={16} /> Imprimer</Button>
         </div>
       </div>
 
-      {/* Cartes de totaux par partie */}
+      {/* Une carte par partie : elle sert aussi d'onglet */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {GROUPS.map((g) => {
           const t = groupTotals(g.id);
           const Icon = g.icon;
+          const on = g.id === activeGroup;
           return (
-            <div key={g.id} className="rounded-2xl border border-gold/15 bg-gradient-card shadow-card p-4">
-              <div className={`flex items-center gap-2 mb-2 ${g.tone}`}>
-                <Icon size={18} /><span className="font-display font-semibold text-text-primary">{g.label(target.kind)}</span>
-                <span className="ml-auto text-[11px] text-text-muted">{t.n} opération(s)</span>
+            <button
+              key={g.id}
+              type="button"
+              onClick={() => setActiveGroup(g.id)}
+              className={`text-left rounded-2xl border p-4 transition-all ${g.tone.soft} ${
+                on ? `${g.tone.border} ring-2 ${g.tone.ring} shadow-card` : 'border-black/[0.06] dark:border-white/[0.07] opacity-80 hover:opacity-100'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <span className={`h-9 w-9 rounded-xl flex items-center justify-center ${g.tone.chip}`}><Icon size={18} /></span>
+                <div className="min-w-0">
+                  <p className="font-display font-semibold text-text-primary leading-tight">{g.label(target.kind)}</p>
+                  <p className="text-[11px] text-text-muted">{t.n} opération(s)</p>
+                </div>
               </div>
-              {!(g.id === 'used' && target.kind === 'fiche') && (
-                <p className="text-xl font-extrabold tabular text-text-primary">{qty(t.q, unit)}</p>
-              )}
-              <p className={`text-sm font-bold tabular ${g.tone}`}>{formatCurrency(t.a)}</p>
-              <div className="mt-2 pt-2 border-t border-gold/10 space-y-1">
-                {sections.filter((s) => s.group === g.id).map((s) => {
-                  const st = sum(s);
-                  return (
-                    <div key={s.id}>
-                      <div className="flex justify-between gap-2 text-[11px]">
-                        <span className="text-text-muted truncate">{s.icon} {s.title} ({s.rows.length})</span>
-                        <span className="tabular font-semibold text-text-secondary shrink-0">
-                          {s.qtyLabel ? `${s.negative ? '−' : ''}${qty(st.q, unit)} · ` : ''}{formatCurrency(st.a)}
-                        </span>
-                      </div>
-                      {s.details.map((d) => (
-                        <div key={d.label} className="flex justify-between text-[11px] pl-4">
-                          <span className="text-text-muted">{d.label}</span>
-                          <span className="tabular text-text-secondary">{d.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
+              <div className="mt-3 flex items-end justify-between gap-2">
+                {!(g.id === 'used' && target.kind === 'fiche')
+                  ? <p className="text-xl font-extrabold tabular text-text-primary leading-none">{qty(t.q, unit)}</p>
+                  : <span />}
+                <p className={`text-sm font-bold tabular ${g.tone.text}`}>{formatCurrency(t.a)}</p>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
 
-      {/* Tableaux détaillés, rangés par partie */}
-      {GROUPS.map((g) => (
-        <div key={g.id} className="space-y-3">
-          <h3 className={`font-display font-bold text-base flex items-center gap-2 ${g.tone}`}>
-            <g.icon size={18} /> {g.label(target.kind)}
-          </h3>
-          {sections.filter((s) => s.group === g.id).map((s) => {
-            const t = sum(s);
-            return (
-              <div key={s.id} className="rounded-2xl border border-gold/15 overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-vanilla/60 border-b border-gold/10">
-                  <span className="text-sm font-semibold text-text-primary">{s.icon} {s.title}</span>
-                  <span className="text-xs tabular text-text-secondary">
-                    {s.rows.length} opération(s){s.qtyLabel ? ` · ${s.qtyLabel} : ${qty(t.q, unit)}` : ''} · {s.amountLabel} : <b>{formatCurrency(t.a)}</b>
-                  </span>
+      {/* Détail de la partie choisie */}
+      <div className="space-y-3">
+        {activeSections.map((s) => {
+          const t = sum(s);
+          const isFolded = folded[s.id] ?? s.rows.length === 0;
+          return (
+            <div key={s.id} className={`rounded-2xl border overflow-hidden bg-[--surface-dropdown] ${s.rows.length ? active.tone.border : 'border-black/[0.06] dark:border-white/[0.07]'}`}>
+              <button
+                type="button"
+                onClick={() => setFolded((f) => ({ ...f, [s.id]: !isFolded }))}
+                className={`w-full flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 text-left ${s.rows.length ? active.tone.soft : ''}`}
+              >
+                <span className="text-sm font-semibold text-text-primary">{s.icon} {s.title}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${s.rows.length ? active.tone.chip : 'bg-black/[0.05] dark:bg-white/[0.06] text-text-muted'}`}>
+                  {s.rows.length}
+                </span>
+                <span className="ml-auto flex items-center gap-3 text-xs tabular text-text-secondary">
+                  {s.rows.length > 0 && (
+                    <>
+                      {s.qtyLabel && <span>{s.qtyLabel} : <b className="text-text-primary">{s.negative ? '−' : ''}{qty(t.q, unit)}</b></span>}
+                      <span>{s.amountLabel} : <b className={active.tone.text}>{s.negative ? '−' : ''}{formatCurrency(t.a)}</b></span>
+                    </>
+                  )}
+                  {s.rows.length === 0 && <span className="text-text-muted">Aucune opération sur la période</span>}
+                  <ChevronDown size={16} className={`text-text-muted transition-transform ${isFolded ? '' : 'rotate-180'}`} />
+                </span>
+              </button>
+              {!isFolded && s.rows.length > 0 && (
+                <div className="overflow-x-auto max-h-80 border-t border-black/[0.06] dark:border-white/[0.07]">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 z-10 bg-vanilla text-text-muted">
+                      <tr>{s.cols.map((c) => (
+                        <th key={c.label} className={`px-3 py-2 text-[10px] font-bold uppercase tracking-wide whitespace-nowrap text-${c.align ?? 'left'}`}>{c.label}</th>
+                      ))}</tr>
+                    </thead>
+                    <tbody>
+                      {s.rows.map((r, i) => (
+                        <tr key={i} className="border-t border-black/[0.05] dark:border-white/[0.05] odd:bg-black/[0.015] dark:odd:bg-white/[0.02] hover:bg-gold/5">
+                          {r.cells.map((c, j) => (
+                            <td key={j} className={`px-3 py-2 tabular whitespace-nowrap text-text-secondary text-${s.cols[j]?.align ?? 'left'} ${j === r.cells.length - 1 || s.cols[j]?.label === 'Montant' ? 'font-semibold text-text-primary' : ''}`}>{c}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                {s.rows.length === 0 ? (
-                  <div className="p-3"><EmptyState message="Aucune opération sur la période" /></div>
-                ) : (
-                  <div className="overflow-x-auto max-h-80">
-                    <table className="w-full text-xs">
-                      <thead className="text-text-secondary sticky top-0 bg-white/95">
-                        <tr>{s.cols.map((c) => (
-                          <th key={c.label} className={`px-3 py-2 font-semibold text-${c.align ?? 'left'}`}>{c.label}</th>
-                        ))}</tr>
-                      </thead>
-                      <tbody>
-                        {s.rows.map((r, i) => (
-                          <tr key={i} className="border-t border-gold/10 hover:bg-gold/5">
-                            {r.cells.map((c, j) => (
-                              <td key={j} className={`px-3 py-1.5 tabular text-${s.cols[j]?.align ?? 'left'}`}>{c}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ))}
+              )}
+              {!isFolded && s.details.length > 0 && (
+                <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 py-2 border-t border-black/[0.06] dark:border-white/[0.07] text-[11px]">
+                  {s.details.map((d) => (
+                    <span key={d.label} className="text-text-muted">{d.label} : <b className="tabular text-text-secondary">{d.value}</b></span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       {/* Choix des parties à imprimer */}
       <Modal open={printOpen} onClose={() => setPrintOpen(false)} title="Imprimer l'historique" size="sm">

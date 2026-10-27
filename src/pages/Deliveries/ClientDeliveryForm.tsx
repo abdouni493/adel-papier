@@ -41,7 +41,7 @@ interface Line {
   ficheId: string;
   productName: string;
   quantity: number;
-  /** Prix unitaire de la partie livrée hors commande (vente directe). */
+  /** Prix unitaire : vente directe à la création, prix de la ligne de commande en modification. */
   unitPrice: number;
 }
 
@@ -133,7 +133,10 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
         if (!fiche) return;
         const cur = grouped.get(fiche.id);
         if (cur) cur.quantity = r3(cur.quantity + it.quantity);
-        else grouped.set(fiche.id, { key: fiche.id, ficheId: fiche.id, productName: fiche.name, quantity: it.quantity, unitPrice: fiche.unitPrice });
+        else grouped.set(fiche.id, {
+          key: fiche.id, ficheId: fiche.id, productName: fiche.name, quantity: it.quantity,
+          unitPrice: cmdItem?.unitPrice ?? fiche.unitPrice,
+        });
       });
       setLines([...grouped.values()]);
       setDeliveredAt(toLocal(editing.deliveredAt));
@@ -285,7 +288,11 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
     // hors modification, ce qui dépasse le reste commandé est une VENTE DIRECTE :
     // une commande est créée pour cette partie, au prix saisi
     const direct = editing ? 0 : r3(Math.max(0, l.quantity - remaining));
-    const alloc = allocateQuantity(openLines, l.ficheId, r3(l.quantity - direct), preferEdit);
+    const allocated = allocateQuantity(openLines, l.ficheId, r3(l.quantity - direct), preferEdit);
+    // en modification, le prix saisi remplace celui des lignes de commande servies
+    const alloc = editing
+      ? { ...allocated, parts: allocated.parts.map((p) => ({ ...p, unitPrice: l.unitPrice })) }
+      : allocated;
     const value = alloc.parts.reduce((s, p) => s + p.take * p.unitPrice, 0) + direct * l.unitPrice;
     const fromReady = Math.min(l.quantity, ready);
     const toProduce = r3(Math.max(0, l.quantity - ready));
@@ -409,6 +416,11 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
       useAdvance,
       creditUsed: money.creditUsed,
       lines: active.map((r) => ({ ficheTechnicId: r.ficheId, productName: r.productName, quantity: r3(r.quantity - r.direct) })),
+      itemPrices: editing
+        ? Object.fromEntries(active.flatMap((r) => r.alloc.parts
+            .filter((p) => Math.abs((openLines.find((o) => o.itemId === p.itemId)?.unitPrice ?? p.unitPrice) - r.unitPrice) > 0.004)
+            .map((p) => [p.itemId, r.unitPrice])))
+        : undefined,
       directLines: active.filter((r) => r.direct > 0.0005).map((r) => ({
         ficheTechnicId: r.ficheId, productName: r.productName, quantity: r.direct, unitPrice: r.unitPrice,
         sellByUnit: !!r.fiche?.sellByUnit, sellUnit: r.fiche?.sellByUnit ? r.fiche.sellUnit : undefined,
@@ -668,6 +680,19 @@ export function ClientDeliveryForm({ open, editing, onClose, onSaved }: Props) {
                         </div>
                         <Info label="Valeur H.T" value={formatCurrency(r.value)} tone="text-gold-dark" />
                       </div>
+
+                      {editing && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-gold/25 bg-gold/5 px-2.5 py-2 text-xs font-semibold text-gold-dark">
+                          <span>Prix unitaire H.T{u ? ` /${u.trim()}` : ''} :</span>
+                          <input
+                            type="number" step="any" min={0}
+                            value={r.unitPrice}
+                            onChange={(e) => setPrice(r.key, Number(e.target.value))}
+                            className="h-8 w-32 rounded-lg border-2 border-[--border-input] bg-[--surface-input] px-2 text-right text-sm font-bold tabular text-text-primary focus:border-gold focus:outline-none"
+                          />
+                          <span className="font-normal text-text-muted">appliqué à la ligne de commande servie par ce bon</span>
+                        </div>
+                      )}
 
                       {r.direct > 0.0005 && (
                         <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-gold/25 bg-gold/5 px-2.5 py-2 text-xs font-semibold text-gold-dark">

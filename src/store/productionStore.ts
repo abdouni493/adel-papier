@@ -38,6 +38,12 @@ interface ProductionState {
   load: () => Promise<void>;
   addProduction: (data: AddProductionInput) => Promise<Production>;
   updateProduction: (id: string, data: Partial<Production>) => Promise<void>;
+  /**
+   * Modifie un lot existant : la nouvelle quantité redose ses matières
+   * (l'écart est rendu au stock ou déduit), le reste est recopié tel quel.
+   */
+  rescaleProduction: (id: string, outputQuantity: number,
+    data?: Partial<Pick<Production, 'description' | 'date' | 'hour' | 'unitPrice' | 'lossDescription'>>) => Promise<void>;
   deleteProduction: (id: string) => Promise<void>;
   transferToComptoir: (id: string, qty: number) => Promise<void>;
   addCategory: (name: string) => Promise<Category>;
@@ -115,6 +121,64 @@ export const useProductionStore = create<ProductionState>()(stable((set, get) =>
       })
     );
     set({ productions: await db.productions.list() });
+  },
+
+  rescaleProduction: async (id, outputQuantity, data = {}) => {
+    const prod = get().productions.find((p) => p.id === id);
+    if (!prod) return;
+    if (outputQuantity <= 0) throw new Error('La quantité doit être supérieure à 0');
+    if (outputQuantity < (prod.sentToComptoir ?? 0)) {
+      throw new Error(`Déjà ${prod.sentToComptoir} envoyé(s) au comptoir : la quantité ne peut pas descendre en dessous`);
+    }
+    const factor = prod.outputQuantity > 0 ? outputQuantity / prod.outputQuantity : 1;
+    const materials = prod.usedProducts.filter((u) => !u.isBox);
+    const box = prod.usedProducts.filter((u) => u.isBox);
+    const lines = materials.map((u) => {
+      const quantity = Number((u.quantityUsed * factor).toFixed(4));
+      return {
+        product_id: u.productId || null,
+        product_name: u.productName,
+        quantity_used: quantity,
+        source_type: u.sourceType ?? 'stock',
+        unit: u.unit ?? null,
+        unit_cost: u.unitCost ?? 0,
+        line_cost: Number((quantity * (u.unitCost ?? 0)).toFixed(2)),
+      };
+    });
+
+    // ce qui sort en plus du stock doit y être
+    const stock = useStockStore.getState().products;
+    lines.forEach((l, i) => {
+      const extra = l.quantity_used - materials[i].quantityUsed;
+      if (l.source_type !== 'stock' || !l.product_id || extra <= 0) return;
+      const p = stock.find((x) => x.id === l.product_id);
+      if (p && extra > p.currentQuantity + 0.0005) {
+        throw new Error(`Stock insuffisant pour « ${p.name} » : ${p.currentQuantity} disponible(s), ${Number(extra.toFixed(4))} requis`);
+      }
+    });
+
+    const unitPrice = data.unitPrice ?? prod.unitPrice;
+    const totalCost = lines.reduce((s, l) => s + l.line_cost, 0) + box.reduce((s, u) => s + (u.lineCost ?? 0), 0);
+    await save('productions.rescale', async () => {
+      if (factor !== 1) await db.productions.replaceUsedProducts(id, lines);
+      await db.productions.update(id, {
+        description: data.description ?? prod.description,
+        date: data.date ?? prod.date,
+        hour: data.hour ?? prod.hour,
+        output_quantity: outputQuantity,
+        unit_price: unitPrice,
+        total_value: Number((outputQuantity * unitPrice).toFixed(2)),
+        total_cost: Number(totalCost.toFixed(2)),
+        ...(prod.hasLoss ? {
+          expected_quantity: prod.expectedQuantity != null ? Number((prod.expectedQuantity * factor).toFixed(4)) : null,
+          loss_quantity: Number(((prod.lossQuantity ?? 0) * factor).toFixed(4)),
+          loss_value: Number(((prod.lossValue ?? 0) * factor).toFixed(2)),
+          loss_description: data.lossDescription ?? prod.lossDescription ?? null,
+        } : {}),
+      });
+    });
+    const [productions] = await Promise.all([db.productions.list(), useStockStore.getState().load()]);
+    set({ productions });
   },
 
   deleteProduction: async (id) => {
