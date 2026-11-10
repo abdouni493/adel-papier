@@ -31,7 +31,7 @@ const defaultTitle = (inv: FreeInvoice) =>
     ? 'BON DE LIVRAISON'
     : inv.docType === 'proforma'
       ? 'FACTURE PROFORMA'
-      : inv.tvaEnabled ? 'FACTURE (T.T.C)' : 'FACTURE';
+      : 'FACTURE';
 
 /**
  * FACTURES NON COMPTABILISÉES — documents seulement imprimés.

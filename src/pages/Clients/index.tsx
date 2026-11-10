@@ -171,19 +171,48 @@ export default function ClientsPage() {
   );
 
   const globals = useMemo(() => {
-    const list = [...statsByClient.values()].map((x) => x.balance);
-    const net = sumAccounts(list);
+    const year = String(new Date().getFullYear());
+    const today = new Date().toISOString().slice(0, 10);
+    const inYear = (d?: string) => (d ?? '').slice(0, 4) === year;
+
+    // Chiffre d'affaires, encaissé et dettes de l'ANNÉE EN COURS : seules les
+    // écritures datées de cette année alimentent les trois premières cartes.
+    const yearAccounts = buildClientAccounts({
+      clients,
+      sales: sales.filter((s) => inYear(s.date)),
+      commands: commands.filter((c) => inYear(c.createdAt)),
+      deliveries: deliveries.filter((d) => inYear(d.date)),
+      oldDebts: oldDebts.filter((d) => inYear(d.date)),
+    });
+    const yList = [...yearAccounts.values()];
+    const yNet = sumAccounts(yList);
+
+    // Dette globale (toutes années) — pour le sous-titre de l'en-tête.
+    const allDebt = sumAccounts([...statsByClient.values()].map((x) => x.balance)).debt;
+
+    // Total des versements encaissés AUJOURD'HUI uniquement (versements des
+    // clients + versements d'anciennes dettes) — toujours le jour courant.
+    const paymentsToday = payments
+      .filter((p) => (p.date ?? '').slice(0, 10) === today)
+      .reduce((acc, p) => acc + (p.amount || 0), 0);
+    const debtVersementsToday = debts.reduce(
+      (acc, d) => acc + (d.versements ?? [])
+        .filter((v) => (v.date ?? '').slice(0, 10) === today)
+        .reduce((s, v) => s + (v.amount || 0), 0),
+      0,
+    );
+
     return {
-      total: list.reduce((acc, x) => acc + x.billed, 0),
+      total: yList.reduce((acc, x) => acc + x.billed, 0),
       // tout l'argent recu, acomptes compris (comme la colonne « Encaisse »)
-      paid: list.reduce((acc, x) => acc + x.paid + x.credit + x.advance, 0),
-      // dette NETTE (acomptes deduits) et acomptes en faveur des clients
-      rest: net.debt,
-      credit: net.credit,
-      withDebt: net.debtors,
-      pending: list.reduce((acc, x) => acc + x.pendingCommands, 0),
+      paid: yList.reduce((acc, x) => acc + x.paid + x.credit + x.advance, 0),
+      // dette NETTE (acomptes deduits) de l'année en cours
+      rest: yNet.debt,
+      allDebt,
+      versementsToday: paymentsToday + debtVersementsToday,
     };
-  }, [statsByClient]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, sales, commands, deliveries, oldDebts, payments, debts, statsByClient]);
 
   const handleSubmit = async (data: Omit<Client, 'id'>, account?: ClientAccountInput) => {
     let clientId: string;
@@ -374,7 +403,7 @@ export default function ClientsPage() {
       <PageHeader
         title="Clients"
         icon={<Users size={24} />}
-        subtitle={`${clients.length} client(s) · ${formatCurrency(globals.rest)} de dettes en cours`}
+        subtitle={`${clients.length} client(s) · ${formatCurrency(globals.allDebt)} de dettes en cours`}
         actions={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => navigate('/commands')}>
@@ -389,12 +418,11 @@ export default function ClientsPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <StatCard label="Chiffre d'affaires clients" value={globals.total} format="currency" icon={<Receipt size={22} />} index={0} accent="gold" />
-        <StatCard label="Total encaissé" value={globals.paid} format="currency" icon={<CheckCircle2 size={22} />} index={1} accent="pistachio" />
-        <StatCard label="Dettes clients" value={globals.rest} format="currency" icon={<TrendingDown size={22} />} index={2} accent="rose" />
-        <StatCard label="Acomptes des clients" value={globals.credit} format="currency" icon={<PiggyBank size={22} />} index={3} accent="pistachio" />
-        <StatCard label="Clients endettés" value={globals.withDebt} icon={<AlertTriangle size={22} />} index={4} accent="caramel" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Chiffre d'affaires clients (année)" value={globals.total} format="currency" icon={<Receipt size={22} />} index={0} accent="gold" />
+        <StatCard label="Total encaissé (année)" value={globals.paid} format="currency" icon={<CheckCircle2 size={22} />} index={1} accent="pistachio" />
+        <StatCard label="Dettes clients (année)" value={globals.rest} format="currency" icon={<TrendingDown size={22} />} index={2} accent="rose" />
+        <StatCard label="Versements du jour" value={globals.versementsToday} format="currency" icon={<HandCoins size={22} />} index={3} accent="pistachio" />
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
