@@ -35,13 +35,45 @@ interface CreatePurchaseProps {
   editing?: Purchase | null;
 }
 
+/**
+ * Mode de calcul d'une ligne d'achat :
+ *  - `qty_price`   : l'utilisateur saisit la quantité et le prix unitaire,
+ *                    le total de la ligne est calculé automatiquement.
+ *  - `qty_total`   : l'utilisateur saisit la quantité et le coût total,
+ *                    le prix unitaire est calculé automatiquement.
+ *  - `total_price` : l'utilisateur saisit le coût total et le prix unitaire,
+ *                    la quantité est calculée automatiquement.
+ */
+type LineCalcMode = 'qty_price' | 'qty_total' | 'total_price';
+
 interface Line extends PurchaseLine {
   _key: string;
   /** Stock réel du produit aujourd'hui, tel qu'il figure dans /stock. */
   stockCurrent: number;
   /** Quantité déjà enregistrée sur cette ligne (0 pour une ligne ajoutée). */
   originalQuantity: number;
+  /** Mode de calcul choisi pour cette ligne. */
+  calcMode: LineCalcMode;
+  /** Coût total de la ligne (quantité × prix unitaire). */
+  lineTotal: number;
 }
+
+/**
+ * Réconcilie quantité, prix unitaire et total d'une ligne selon son mode :
+ * le champ calculé est toujours déduit des deux autres.
+ */
+const normalizeLine = (l: Line): Line => {
+  const qty = Number(l.quantity) || 0;
+  const price = Number(l.purchasePrice) || 0;
+  const total = Number(l.lineTotal) || 0;
+  if (l.calcMode === 'qty_total') {
+    return { ...l, purchasePrice: qty > 0 ? total / qty : 0 };
+  }
+  if (l.calcMode === 'total_price') {
+    return { ...l, quantity: price > 0 ? total / price : 0 };
+  }
+  return { ...l, lineTotal: qty * price };
+};
 
 export function CreatePurchase({ onClose, onCreated, historical = false, editing = null }: CreatePurchaseProps) {
   const products = useStockStore((s) => s.products);
@@ -100,6 +132,8 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
           // Un ancien achat n'a jamais alimenté le stock : son écart est nul.
           originalQuantity: editing.isHistorical ? 0 : Number(l.quantity),
           stockCurrent: prod?.currentQuantity ?? 0,
+          calcMode: 'qty_price' as LineCalcMode,
+          lineTotal: Number(l.quantity) * Number(l.purchasePrice),
         };
       })
     );
@@ -161,13 +195,15 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
         expirationDate: p.expirationDate,
         stockCurrent: p.currentQuantity,
         originalQuantity: 0,
+        calcMode: 'qty_price',
+        lineTotal: p.purchasePrice,
       },
     ]);
     setProductSearch('');
   };
 
   const updateLine = (key: string, data: Partial<Line>) =>
-    setLines((prev) => prev.map((l) => (l._key === key ? { ...l, ...data } : l)));
+    setLines((prev) => prev.map((l) => (l._key === key ? normalizeLine({ ...l, ...data }) : l)));
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l._key !== key));
 
   const handleProductCreated = async (data: Omit<Product, 'id' | 'createdAt'>) => {
@@ -199,7 +235,7 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
     }
     setSaving(true);
     try {
-      const payloadLines = lines.map(({ _key, stockCurrent, originalQuantity, ...l }) => ({
+      const payloadLines = lines.map(({ _key, stockCurrent, originalQuantity, calcMode, lineTotal, ...l }) => ({
         ...l,
         quantity: Number(l.quantity),
         purchasePrice: Number(l.purchasePrice),
@@ -387,18 +423,62 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* Mode de calcul de la ligne : l'utilisateur choisit les deux
+                    valeurs qu'il saisit, la troisième est calculée automatiquement. */}
+                <div className="mb-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1.5">
+                    Mode de calcul
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {([
+                      { mode: 'qty_price', label: 'Quantité + Prix unitaire' },
+                      { mode: 'qty_total', label: 'Quantité + Coût total' },
+                      { mode: 'total_price', label: 'Coût total + Prix unitaire' },
+                    ] as { mode: LineCalcMode; label: string }[]).map((opt) => (
+                      <button
+                        key={opt.mode}
+                        type="button"
+                        onClick={() => updateLine(l._key, { calcMode: opt.mode })}
+                        className={
+                          'rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors ' +
+                          (l.calcMode === opt.mode
+                            ? 'bg-gold text-white shadow-sm'
+                            : 'bg-white/70 text-text-secondary border border-gold/20 hover:bg-gold/10')
+                        }
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                   <Input
                     label={unit ? `Quantité (${unit})` : 'Quantité'}
                     type="number" step="any" min={0}
-                    value={l.quantity}
+                    value={l.calcMode === 'total_price' ? Number(qty.toFixed(3)) : l.quantity}
+                    disabled={l.calcMode === 'total_price'}
+                    title={l.calcMode === 'total_price' ? 'Calculée automatiquement' : undefined}
+                    className={l.calcMode === 'total_price' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
                     onChange={(e) => updateLine(l._key, { quantity: Number(e.target.value) })}
                   />
                   <Input
                     label={unit ? `Prix pour 1 ${unit} (DA)` : 'Prix unitaire (DA)'}
                     type="number" step="any" min={0}
-                    value={l.purchasePrice}
+                    value={l.calcMode === 'qty_total' ? Number(price.toFixed(3)) : l.purchasePrice}
+                    disabled={l.calcMode === 'qty_total'}
+                    title={l.calcMode === 'qty_total' ? 'Calculé automatiquement' : undefined}
+                    className={l.calcMode === 'qty_total' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
                     onChange={(e) => updateLine(l._key, { purchasePrice: Number(e.target.value) })}
+                  />
+                  <Input
+                    label="Coût total (DA)"
+                    type="number" step="any" min={0}
+                    value={l.calcMode === 'qty_price' ? Number((qty * price).toFixed(3)) : l.lineTotal}
+                    disabled={l.calcMode === 'qty_price'}
+                    title={l.calcMode === 'qty_price' ? 'Calculé automatiquement' : undefined}
+                    className={l.calcMode === 'qty_price' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
+                    onChange={(e) => updateLine(l._key, { lineTotal: Number(e.target.value) })}
                   />
                   <Input
                     label={unit ? `Seuil d'alerte (${unit})` : "Seuil d'alerte"}

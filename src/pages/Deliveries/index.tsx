@@ -281,11 +281,10 @@ export default function DeliveriesPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Bons de livraison" value={stats.count} icon={<Truck size={22} />} index={0} accent="gold" />
-        <StatCard label="Quantité livrée" value={stats.qty} icon={<PackageCheck size={22} />} index={1} accent="pistachio" />
-        <StatCard label="Valeur livrée (TTC)" value={stats.value} format="currency" icon={<Receipt size={22} />} index={2} accent="caramel" />
-        <StatCard label="Reste dû" value={stats.rest} format="currency" icon={<Wallet size={22} />} index={3} accent="rose" />
+        <StatCard label="Valeur livrée (TTC)" value={stats.value} format="currency" icon={<Receipt size={22} />} index={1} accent="caramel" />
+        <StatCard label="Total solde des clients" value={stats.rest} format="currency" icon={<Wallet size={22} />} index={2} accent="rose" />
       </div>
 
       <div className="flex border-b border-gold/15">

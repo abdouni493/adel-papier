@@ -123,13 +123,6 @@ export default function SalesPage() {
         subtitle={`${sales.length} vente(s) — caisse et bons de livraison réunis`}
       />
 
-      {/* Ventes de caisse + ventes issues des livraisons + dettes */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard index={0} label="Total ventes" value={totals.all} format="currency" icon={<Receipt size={20} />} accent="gold" />
-        <StatCard index={1} label={`Ventes caisse (${totals.posCount})`} value={totals.posTotal} format="currency" icon={<Store size={20} />} accent="pistachio" />
-        <StatCard index={2} label={`Livraisons facturées (${totals.deliveryCount})`} value={totals.deliveryTotal} format="currency" icon={<Truck size={20} />} accent="lavender" />
-        <StatCard index={3} label="Dettes clients" value={totals.debt} format="currency" icon={<Wallet size={20} />} accent="rose" />
-      </div>
 
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex-1 min-w-[200px]"><SearchBar value={search} onChange={setSearch} placeholder="Rechercher par client, n° facture ou n° bon de commande…" /></div>
