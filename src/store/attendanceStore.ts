@@ -30,6 +30,9 @@ const toSettings = (r: any): AttendanceSettings => ({
   restDays: (r.rest_days ?? [5]).map(Number),
   deductAbsences: r.deduct_absences ?? true,
   deductLate: r.deduct_late ?? false,
+  breakEnabled: r.break_enabled ?? false,
+  breakStart: String(r.break_start ?? '12:00').slice(0, 5),
+  breakEnd: String(r.break_end ?? '13:00').slice(0, 5),
 });
 
 const toDevice = (r: any): AttendanceDevice => ({
@@ -114,6 +117,7 @@ export const useAttendanceStore = create<AttendanceState>()((set, get) => ({
         late_tolerance_min: st.lateToleranceMin, early_tolerance_min: st.earlyToleranceMin,
         min_overtime_min: st.minOvertimeMin, rest_days: st.restDays,
         deduct_absences: st.deductAbsences, deduct_late: st.deductLate,
+        break_enabled: st.breakEnabled, break_start: st.breakStart, break_end: st.breakEnd,
         updated_at: new Date().toISOString(),
       });
       fail(error);

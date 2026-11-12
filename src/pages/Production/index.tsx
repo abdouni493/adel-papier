@@ -286,12 +286,6 @@ export default function ProductionPage() {
 
       {activeTab === 'productions' ? (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <StatCard label="Valeur produite" value={prodStats.value} format="currency" icon={<Factory size={22} />} index={0} accent="gold" />
-            <StatCard label="Coût des matières" value={prodStats.cost} format="currency" icon={<Coins size={22} />} index={1} accent="rose" />
-            <StatCard label="Gains estimés" value={prodStats.gains} format="currency" icon={<TrendingUp size={22} />} index={2} accent="pistachio" />
-            <StatCard label="Stock prêt (comptoir compris)" value={prodStats.remaining} icon={<PackageCheck size={22} />} index={3} accent="caramel" />
-          </div>
 
           <div className="flex flex-wrap items-center gap-3 mb-6">
             <div className="flex-1 min-w-[200px]"><SearchBar value={search} onChange={setSearch} placeholder={t('search')} /></div>

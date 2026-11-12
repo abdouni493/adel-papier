@@ -337,12 +337,11 @@ export default function SuppliersPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Total achats" value={globals.total} format="currency" icon={<Receipt size={22} />} index={0} accent="gold" />
         <StatCard label="Total réglé" value={globals.paid} format="currency" icon={<CheckCircle2 size={22} />} index={1} accent="pistachio" />
         <StatCard label="Dettes fournisseurs" value={globals.rest} format="currency" icon={<TrendingDown size={22} />} index={2} accent="rose" />
         <StatCard label="Trop-versés à récupérer" value={globals.credit} format="currency" icon={<PiggyBank size={22} />} index={3} accent="pistachio" />
-        <StatCard label="Fournisseurs à payer" value={globals.withDebt} icon={<AlertTriangle size={22} />} index={4} accent="caramel" />
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

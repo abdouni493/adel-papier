@@ -19,7 +19,21 @@ export const DEFAULT_ATTENDANCE_SETTINGS: AttendanceSettings = {
   restDays: [5],
   deductAbsences: true,
   deductLate: false,
+  breakEnabled: false,
+  breakStart: '12:00',
+  breakEnd: '13:00',
 };
+
+/** Pause active (minutes) ou null. */
+export function breakWindow(s: AttendanceSettings): { start: number; end: number } | null {
+  if (!s.breakEnabled) return null;
+  const start = toMin(s.breakStart);
+  const end = toMin(s.breakEnd);
+  return end > start ? { start, end } : null;
+}
+/** Minutes de [a, b] qui tombent dans la pause. */
+const breakOverlap = (a: number, b: number, br: { start: number; end: number } | null) =>
+  br ? Math.max(0, Math.min(b, br.end) - Math.max(a, br.start)) : 0;
 
 export const WEEKDAYS = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 export const MONTHS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août',
@@ -153,8 +167,29 @@ export function computeDay(
   const startMin = toMin(start);
   const endMin = toMin(end);
 
-  const late = entryMin - startMin;
-  const early = exitMin !== null ? endMin - exitMin : 0;
+  const br = breakWindow(s);
+
+  // retard : une entrée pendant la pause n'est comptée qu'à partir de la fin de pause
+  let late = entryMin - startMin - breakOverlap(startMin, entryMin, br);
+  // départ anticipé : le temps de pause n'est pas compté comme manquant
+  let early = exitMin !== null ? endMin - exitMin - breakOverlap(exitMin, endMin, br) : 0;
+  let pauseLate = 0;
+  let pauseEarly = 0;
+  if (br && sorted.length >= 4) {
+    // pointages intermédiaires : sortie pour la pause puis retour
+    const mids = sorted.slice(1, -1).map((p) => toMin(punchTime(p)));
+    const outIdx = mids.findIndex((m) => m >= br.start - 60 && m <= br.end);
+    if (outIdx >= 0 && outIdx + 1 < mids.length) {
+      const out = mids[outIdx];
+      const back = mids[outIdx + 1];
+      if (br.start - out > s.earlyToleranceMin) pauseEarly = br.start - out;
+      if (back - br.end > s.lateToleranceMin) pauseLate = back - br.end;
+    }
+  }
+  if (late <= s.lateToleranceMin) late = 0;
+  if (early <= s.earlyToleranceMin) early = 0;
+  late += pauseLate;
+  early += pauseEarly;
   // heures sup. comptées à partir de la fin du travail + délai (16:00 + 20 min → 16:20)
   const over = exitMin !== null ? exitMin - (endMin + s.minOvertimeMin) : 0;
 
@@ -163,9 +198,10 @@ export function computeDay(
     status: 'present',
     entry: punchTime(first),
     exit: hasExit ? punchTime(last) : null,
-    workedMin: exitMin !== null ? exitMin - entryMin : 0,
-    lateMin: !isRest && late > s.lateToleranceMin ? late : 0,
-    earlyMin: !isRest && exitMin !== null && early > s.earlyToleranceMin ? early : 0,
+    // la pause n'est jamais comptée comme temps de travail
+    workedMin: exitMin !== null ? exitMin - entryMin - breakOverlap(entryMin, exitMin, br) : 0,
+    lateMin: !isRest && late > 0 ? late : 0,
+    earlyMin: !isRest && exitMin !== null && early > 0 ? early : 0,
     overtimeMin: exitMin !== null && over > 0 ? over : 0,
     missingExit: !hasExit && date < today,
   };
@@ -198,7 +234,7 @@ export function computeMonth(
     presentDays: 0, absentDays: 0, recordedAbsences: 0, restWorkedDays: 0,
     lateCount: 0, lateMin: 0, earlyCount: 0, earlyMin: 0, workedMin: 0, overtimeMin: 0,
     missingExitCount: 0,
-    scheduledMinPerDay: Math.max(60, toMin(end) - toMin(start)),
+    scheduledMinPerDay: Math.max(60, toMin(end) - toMin(start) - breakOverlap(toMin(start), toMin(end), breakWindow(s))),
   };
   for (const r of records) {
     if (r.status === 'present') {

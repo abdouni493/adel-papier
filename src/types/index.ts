@@ -508,6 +508,10 @@ export interface AttendanceSettings {
   restDays: number[];
   deductAbsences: boolean;
   deductLate: boolean;
+  /** Pause (repos) entre le travail du matin et de l'après-midi */
+  breakEnabled: boolean;
+  breakStart: string;
+  breakEnd: string;
 }
 
 export interface AttendanceDevice {

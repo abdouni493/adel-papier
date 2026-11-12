@@ -474,6 +474,19 @@ function SettingsForm({ initial, onSave }: { initial: AttendanceSettings; onSave
           })}
         </div>
       </div>
+      <div className="rounded-xl border border-gold/15 p-3 space-y-3">
+        <Switch checked={f.breakEnabled} onChange={(v) => set('breakEnabled', v)} label="Activer le temps de repos (pause) entre le matin et l'après-midi" />
+        {f.breakEnabled && (
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Début du repos" type="time" value={f.breakStart} onChange={(e) => set('breakStart', e.target.value)} />
+            <Input label="Fin du repos" type="time" value={f.breakEnd} onChange={(e) => set('breakEnd', e.target.value)} />
+          </div>
+        )}
+        <p className="text-xs text-text-muted">
+          Le temps de repos n'est pas compté comme travail et n'est jamais déduit du salaire :
+          un employé qui sort à {f.breakStart || '12:00'} et revient à {f.breakEnd || '13:00'} n'a ni retard ni départ anticipé.
+        </p>
+      </div>
       <div className="space-y-2">
         <Switch checked={f.deductAbsences} onChange={(v) => set('deductAbsences', v)} label="Déduire les absences non justifiées du salaire mensuel" />
         <Switch checked={f.deductLate} onChange={(v) => set('deductLate', v)} label="Paie : retards cochés (déduits) par défaut" />

@@ -1,5 +1,5 @@
 import {
-  Gauge, PackageSearch, Cog, ShoppingBasket, ReceiptText, ScanBarcode,
+  Gauge, PackageSearch, Cog, ShoppingBasket, ReceiptText, 
   Contact, ClipboardCheck, Container, UsersRound, HandCoins, Vault,
   ChartNoAxesCombined, SlidersHorizontal, Truck, FileText, Globe, ShoppingCart, Fingerprint,
 } from 'lucide-react';
@@ -26,7 +26,6 @@ export const navItems: NavItem[] = [
   { to: '/production', key: 'production', module: 'production', icon: Cog, group: 'production' },
   { to: '/purchase', key: 'purchase', module: 'purchase', icon: ShoppingBasket, group: 'production' },
   { to: '/sales', key: 'sales', module: 'sales', icon: ReceiptText, group: 'commercial' },
-  { to: '/pos', key: 'pos', module: 'pos', icon: ScanBarcode, group: 'commercial' },
   { to: '/clients', key: 'clients', module: 'clients', icon: Contact, group: 'commercial' },
   { to: '/commands', key: 'commands', module: 'clients', icon: ClipboardCheck, group: 'commercial' },
   { to: '/livraisons', key: 'deliveries', module: 'clients', icon: Truck, group: 'commercial' },

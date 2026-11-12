@@ -90,6 +90,8 @@ export default function ClientsPage() {
 
   const [view, setView] = useViewMode('clients');
   const [search, setSearch] = useState('');
+  const [caOpen, setCaOpen] = useState(false);
+  const [caSearch, setCaSearch] = useState('');
   const [filter, setFilter] = useState<ClientFilter>('all');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Client | null>(null);
@@ -202,7 +204,13 @@ export default function ClientsPage() {
       0,
     );
 
+    const yearByClient = clients
+      .map((c) => ({ client: c, total: yearAccounts.get(c.id)?.billed ?? 0 }))
+      .filter((x) => x.total > 0)
+      .sort((a, b) => b.total - a.total);
+
     return {
+      yearByClient,
       total: yList.reduce((acc, x) => acc + x.billed, 0),
       // tout l'argent recu, acomptes compris (comme la colonne « Encaisse »)
       paid: yList.reduce((acc, x) => acc + x.paid + x.credit + x.advance, 0),
@@ -418,12 +426,46 @@ export default function ClientsPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Chiffre d'affaires clients (année)" value={globals.total} format="currency" icon={<Receipt size={22} />} index={0} accent="gold" />
-        <StatCard label="Total encaissé (année)" value={globals.paid} format="currency" icon={<CheckCircle2 size={22} />} index={1} accent="pistachio" />
-        <StatCard label="Dettes clients (année)" value={globals.rest} format="currency" icon={<TrendingDown size={22} />} index={2} accent="rose" />
-        <StatCard label="Versements du jour" value={globals.versementsToday} format="currency" icon={<HandCoins size={22} />} index={3} accent="pistachio" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <div role="button" tabIndex={0} className="cursor-pointer" title="Voir le chiffre d'affaires de chaque client"
+          onClick={() => setCaOpen(true)} onKeyDown={(e) => { if (e.key === 'Enter') setCaOpen(true); }}>
+          <StatCard label="Chiffre d'affaires clients (annuelle)" value={globals.total} format="currency" icon={<Receipt size={22} />} index={0} accent="gold" />
+        </div>
+        <StatCard label="Dettes clients (annuelle)" value={globals.rest} format="currency" icon={<TrendingDown size={22} />} index={1} accent="rose" />
+        <StatCard label="Versements du jour" value={globals.versementsToday} format="currency" icon={<HandCoins size={22} />} index={2} accent="pistachio" />
       </div>
+
+      <Modal open={caOpen} onClose={() => { setCaOpen(false); setCaSearch(''); }} title="Chiffre d'affaires par client (annuelle)" size="lg">
+        <div className="space-y-3">
+          <SearchBar value={caSearch} onChange={setCaSearch} placeholder="Rechercher un client…" />
+          <div className="max-h-[60vh] overflow-y-auto rounded-xl border border-gold/15">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-vanilla">
+                <tr className="text-left text-text-muted">
+                  <th className="px-3 py-2">#</th>
+                  <th className="px-3 py-2">Client</th>
+                  <th className="px-3 py-2 text-right">Chiffre d'affaires</th>
+                </tr>
+              </thead>
+              <tbody>
+                {globals.yearByClient
+                  .filter((x) => x.client.name.toLowerCase().includes(caSearch.toLowerCase()) || (x.client.phone || '').includes(caSearch))
+                  .map((x, i) => (
+                    <tr key={x.client.id} className="border-t border-gold/10">
+                      <td className="px-3 py-2 text-text-muted">{i + 1}</td>
+                      <td className="px-3 py-2 font-medium text-text-primary">{x.client.name}</td>
+                      <td className="px-3 py-2 text-right font-semibold">{formatCurrency(x.total)}</td>
+                    </tr>
+                  ))}
+                {globals.yearByClient.length === 0 && (
+                  <tr><td colSpan={3} className="px-3 py-6 text-center text-text-muted">Aucun chiffre d'affaires cette année</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-right text-sm font-semibold">Total : {formatCurrency(globals.total)}</p>
+        </div>
+      </Modal>
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-[220px] flex-1">

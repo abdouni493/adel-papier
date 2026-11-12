@@ -246,13 +246,6 @@ export function PurchaseCostsSection({
         onChange={(euroAmount, exchangeRate) => set({ euroAmount, exchangeRate })}
       />
 
-      {/* Totaux */}
-      <div className="rounded-xl border-2 border-gold/30 bg-gold/5 p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-        <div><p className="text-xs text-text-muted">Total H.T</p><p className="font-bold tabular">{formatCurrency(totalHt)}</p></div>
-        <div><p className="text-xs text-text-muted">Total après TVA</p><p className="font-bold tabular text-gold-dark">{formatCurrency(t.ttc)}</p></div>
-        <div><p className="text-xs text-text-muted">Total des frais</p><p className="font-bold tabular text-caramel">{formatCurrency(t.fees)}</p></div>
-        <div><p className="text-xs text-text-muted">Coût total final</p><p className="text-lg font-bold tabular text-rose-deep">{formatCurrency(t.grand)}</p></div>
-      </div>
     </section>
   );
 }

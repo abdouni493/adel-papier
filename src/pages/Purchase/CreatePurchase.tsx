@@ -52,8 +52,6 @@ interface Line extends PurchaseLine {
   stockCurrent: number;
   /** Quantité déjà enregistrée sur cette ligne (0 pour une ligne ajoutée). */
   originalQuantity: number;
-  /** Mode de calcul choisi pour cette ligne. */
-  calcMode: LineCalcMode;
   /** Coût total de la ligne (quantité × prix unitaire). */
   lineTotal: number;
 }
@@ -62,14 +60,14 @@ interface Line extends PurchaseLine {
  * Réconcilie quantité, prix unitaire et total d'une ligne selon son mode :
  * le champ calculé est toujours déduit des deux autres.
  */
-const normalizeLine = (l: Line): Line => {
+const normalizeLine = (l: Line, mode: LineCalcMode): Line => {
   const qty = Number(l.quantity) || 0;
   const price = Number(l.purchasePrice) || 0;
   const total = Number(l.lineTotal) || 0;
-  if (l.calcMode === 'qty_total') {
+  if (mode === 'qty_total') {
     return { ...l, purchasePrice: qty > 0 ? total / qty : 0 };
   }
-  if (l.calcMode === 'total_price') {
+  if (mode === 'total_price') {
     return { ...l, quantity: price > 0 ? total / price : 0 };
   }
   return { ...l, lineTotal: qty * price };
@@ -91,6 +89,8 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
   const isHistorical = editing ? !!editing.isHistorical : historical;
 
   const [productSearch, setProductSearch] = useState('');
+  /** Mode de calcul appliqué à TOUS les produits (par défaut : quantité + coût total → prix unitaire). */
+  const [calcMode, setCalcMode] = useState<LineCalcMode>('qty_total');
   const [lines, setLines] = useState<Line[]>([]);
   const [supplierSearch, setSupplierSearch] = useState('');
   const [supplierId, setSupplierId] = useState('');
@@ -132,7 +132,6 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
           // Un ancien achat n'a jamais alimenté le stock : son écart est nul.
           originalQuantity: editing.isHistorical ? 0 : Number(l.quantity),
           stockCurrent: prod?.currentQuantity ?? 0,
-          calcMode: 'qty_price' as LineCalcMode,
           lineTotal: Number(l.quantity) * Number(l.purchasePrice),
         };
       })
@@ -140,7 +139,7 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
   }, [editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalHt = useMemo(
-    () => lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.purchasePrice) || 0), 0),
+    () => Math.round(lines.reduce((s, l) => s + (Number(l.lineTotal) || 0), 0) * 100) / 100,
     [lines]
   );
   const costTotals = computeCosts(totalHt, costs);
@@ -195,7 +194,6 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
         expirationDate: p.expirationDate,
         stockCurrent: p.currentQuantity,
         originalQuantity: 0,
-        calcMode: 'qty_price',
         lineTotal: p.purchasePrice,
       },
     ]);
@@ -203,7 +201,11 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
   };
 
   const updateLine = (key: string, data: Partial<Line>) =>
-    setLines((prev) => prev.map((l) => (l._key === key ? normalizeLine({ ...l, ...data }) : l)));
+    setLines((prev) => prev.map((l) => (l._key === key ? normalizeLine({ ...l, ...data }, calcMode) : l)));
+  const changeCalcMode = (mode: LineCalcMode) => {
+    setCalcMode(mode);
+    setLines((prev) => prev.map((l) => ({ ...l, lineTotal: (Number(l.quantity) || 0) * (Number(l.purchasePrice) || 0) })));
+  };
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l._key !== key));
 
   const handleProductCreated = async (data: Omit<Product, 'id' | 'createdAt'>) => {
@@ -235,7 +237,7 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
     }
     setSaving(true);
     try {
-      const payloadLines = lines.map(({ _key, stockCurrent, originalQuantity, calcMode, lineTotal, ...l }) => ({
+      const payloadLines = lines.map(({ _key, stockCurrent, originalQuantity, lineTotal, ...l }) => ({
         ...l,
         quantity: Number(l.quantity),
         purchasePrice: Number(l.purchasePrice),
@@ -395,6 +397,33 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
           </Button>
         </div>
 
+        <div className="mb-3 rounded-xl border border-gold/15 bg-white/40 p-2.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1.5">
+            Mode de calcul (appliqué à tous les produits)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {([
+              { mode: 'qty_total', label: 'Quantité + Coût total → prix unitaire' },
+              { mode: 'qty_price', label: 'Quantité + Prix unitaire → coût total' },
+              { mode: 'total_price', label: 'Coût total + Prix unitaire → quantité' },
+            ] as { mode: LineCalcMode; label: string }[]).map((opt) => (
+              <button
+                key={opt.mode}
+                type="button"
+                onClick={() => changeCalcMode(opt.mode)}
+                className={
+                  'rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors ' +
+                  (calcMode === opt.mode
+                    ? 'bg-gold text-white shadow-sm'
+                    : 'bg-white/70 text-text-secondary border border-gold/20 hover:bg-gold/10')
+                }
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="space-y-3">
           {lines.map((l) => {
             const qty = Number(l.quantity) || 0;
@@ -423,61 +452,32 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
                   </button>
                 </div>
 
-                {/* Mode de calcul de la ligne : l'utilisateur choisit les deux
-                    valeurs qu'il saisit, la troisième est calculée automatiquement. */}
-                <div className="mb-2.5">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1.5">
-                    Mode de calcul
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {([
-                      { mode: 'qty_price', label: 'Quantité + Prix unitaire' },
-                      { mode: 'qty_total', label: 'Quantité + Coût total' },
-                      { mode: 'total_price', label: 'Coût total + Prix unitaire' },
-                    ] as { mode: LineCalcMode; label: string }[]).map((opt) => (
-                      <button
-                        key={opt.mode}
-                        type="button"
-                        onClick={() => updateLine(l._key, { calcMode: opt.mode })}
-                        className={
-                          'rounded-lg px-2.5 py-1.5 text-[11px] font-semibold transition-colors ' +
-                          (l.calcMode === opt.mode
-                            ? 'bg-gold text-white shadow-sm'
-                            : 'bg-white/70 text-text-secondary border border-gold/20 hover:bg-gold/10')
-                        }
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
                   <Input
                     label={unit ? `Quantité (${unit})` : 'Quantité'}
                     type="number" step="any" min={0}
-                    value={l.calcMode === 'total_price' ? Number(qty.toFixed(3)) : l.quantity}
-                    disabled={l.calcMode === 'total_price'}
-                    title={l.calcMode === 'total_price' ? 'Calculée automatiquement' : undefined}
-                    className={l.calcMode === 'total_price' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
+                    value={calcMode === 'total_price' ? Number(qty.toFixed(3)) : l.quantity}
+                    disabled={calcMode === 'total_price'}
+                    title={calcMode === 'total_price' ? 'Calculée automatiquement' : undefined}
+                    className={calcMode === 'total_price' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
                     onChange={(e) => updateLine(l._key, { quantity: Number(e.target.value) })}
                   />
                   <Input
                     label={unit ? `Prix pour 1 ${unit} (DA)` : 'Prix unitaire (DA)'}
                     type="number" step="any" min={0}
-                    value={l.calcMode === 'qty_total' ? Number(price.toFixed(3)) : l.purchasePrice}
-                    disabled={l.calcMode === 'qty_total'}
-                    title={l.calcMode === 'qty_total' ? 'Calculé automatiquement' : undefined}
-                    className={l.calcMode === 'qty_total' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
+                    value={calcMode === 'qty_total' ? Number(price.toFixed(3)) : l.purchasePrice}
+                    disabled={calcMode === 'qty_total'}
+                    title={calcMode === 'qty_total' ? 'Calculé automatiquement' : undefined}
+                    className={calcMode === 'qty_total' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
                     onChange={(e) => updateLine(l._key, { purchasePrice: Number(e.target.value) })}
                   />
                   <Input
                     label="Coût total (DA)"
                     type="number" step="any" min={0}
-                    value={l.calcMode === 'qty_price' ? Number((qty * price).toFixed(3)) : l.lineTotal}
-                    disabled={l.calcMode === 'qty_price'}
-                    title={l.calcMode === 'qty_price' ? 'Calculé automatiquement' : undefined}
-                    className={l.calcMode === 'qty_price' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
+                    value={calcMode === 'qty_price' ? Number((qty * price).toFixed(3)) : l.lineTotal}
+                    disabled={calcMode === 'qty_price'}
+                    title={calcMode === 'qty_price' ? 'Calculé automatiquement' : undefined}
+                    className={calcMode === 'qty_price' ? 'bg-vanilla/40 text-gold-dark font-bold' : ''}
                     onChange={(e) => updateLine(l._key, { lineTotal: Number(e.target.value) })}
                   />
                   <Input
@@ -621,12 +621,32 @@ export function CreatePurchase({ onClose, onCreated, historical = false, editing
           <Wallet size={16} className="text-gold" /> 4. Paiement
         </h3>
         <div className="flex flex-wrap items-end gap-4">
-          <div className="flex-1 min-w-[150px]">
-            <p className="text-xs text-text-muted">{costs.tvaEnabled ? 'Total de la facture (T.T.C)' : 'Total de la facture'}</p>
-            <p className="text-2xl font-bold text-gold-dark tabular">{formatCurrency(total)}</p>
-            {costTotals.fees > 0 && (
-              <p className="text-[11px] text-text-muted">
-                + frais {formatCurrency(costTotals.fees)} = coût final <b className="text-rose-deep">{formatCurrency(costTotals.grand)}</b>
+          <div className="w-full rounded-xl border-2 border-gold/30 bg-gold/5 p-3 text-sm space-y-1">
+            <div className="flex justify-between"><span className="text-text-muted">Produits sélectionnés (H.T)</span><b className="tabular">{formatCurrency(totalHt)}</b></div>
+            {costs.tvaEnabled && (
+              <div className="flex justify-between"><span className="text-text-muted">TVA ({costs.tvaRate}%)</span><b className="tabular">{formatCurrency(costTotals.tva)}</b></div>
+            )}
+            <div className="flex justify-between border-t border-gold/15 pt-1">
+              <span className="text-text-secondary">{costs.tvaEnabled ? 'Total facture fournisseur (T.T.C)' : 'Total facture fournisseur'}</span>
+              <b className="tabular text-gold-dark text-lg">{formatCurrency(total)}</b>
+            </div>
+            {(Number(costs.customsFees) || 0) > 0 && (
+              <div className="flex justify-between"><span className="text-text-muted">Frais de douane</span><b className="tabular">{formatCurrency(Number(costs.customsFees))}</b></div>
+            )}
+            {(Number(costs.transitFees) || 0) > 0 && (
+              <div className="flex justify-between"><span className="text-text-muted">Frais transitaire</span><b className="tabular">{formatCurrency(Number(costs.transitFees))}</b></div>
+            )}
+            {costTotals.extra > 0 && (
+              <div className="flex justify-between"><span className="text-text-muted">Frais supplémentaires</span><b className="tabular">{formatCurrency(costTotals.extra)}</b></div>
+            )}
+            <div className="flex justify-between border-t border-gold/15 pt-1">
+              <span className="font-semibold text-text-primary">Coût total final</span>
+              <b className="tabular text-rose-deep text-xl">{formatCurrency(costTotals.grand)}</b>
+            </div>
+            {lines.length > 0 && (
+              <p className="text-[11px] text-text-muted pt-1">
+                Prix unitaire de chaque produit calculé automatiquement :{' '}
+                {lines.map((l) => `${l.productName} ${formatCurrency(Number(l.purchasePrice) || 0)}${l.unit ? '/' + l.unit : ''}`).join(' · ')}
               </p>
             )}
           </div>
