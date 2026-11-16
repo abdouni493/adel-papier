@@ -38,10 +38,13 @@ interface WorkerState {
   deleteRole: (id: string) => Promise<void>;
   setPermissions: (workerId: string, perms: WorkerPermissions) => Promise<void>;
   addAcompte: (workerId: string, adv: Omit<Acompte, 'id'>) => Promise<void>;
+  updateAcompte: (id: string, data: Partial<Omit<Acompte, 'id'>>) => Promise<void>;
   deleteAcompte: (workerId: string, id: string) => Promise<void>;
   addAbsence: (workerId: string, abs: Omit<Absence, 'id'>) => Promise<void>;
+  updateAbsence: (id: string, data: Partial<Omit<Absence, 'id'>>) => Promise<void>;
   deleteAbsence: (workerId: string, id: string) => Promise<void>;
   addPayment: (workerId: string, p: Omit<WorkerPaymentRecord, 'id'>) => Promise<void>;
+  updatePayment: (id: string, data: Partial<Omit<WorkerPaymentRecord, 'id' | 'kind'>>) => Promise<void>;
   deletePayment: (workerId: string, id: string) => Promise<void>;
   // ---- heures supplémentaires ----
   addOvertime: (data: Omit<WorkerOvertime, 'id' | 'isPaid'>) => Promise<void>;
@@ -58,6 +61,9 @@ interface WorkerState {
 }
 
 const fail = (error: { message: string } | null) => { if (error) throw new Error(error.message); };
+/** Retire les champs non fournis pour une mise à jour partielle. */
+const clean = (o: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 const hm = (t: string) => t.split(':').map(Number) as [number, number];
 
 const overtimePayload = (d: Partial<WorkerOvertime>) => ({
@@ -161,6 +167,14 @@ export const useWorkerStore = create<WorkerState>()(stable((set, get) => {
       await reload();
     },
 
+    updateAcompte: async (id, data) => {
+      await save('workers.acompte.update', async () =>
+        fail((await supabase.from('worker_acomptes').update(clean({
+          date: data.date, amount: data.amount, description: data.description,
+        })).eq('id', id)).error));
+      await reload();
+    },
+
     deleteAcompte: async (workerId, id) => {
       await save('workers.acompte.delete', () => removeRow('worker_acomptes', id));
       await reload();
@@ -176,6 +190,14 @@ export const useWorkerStore = create<WorkerState>()(stable((set, get) => {
       await reload();
     },
 
+    updateAbsence: async (id, data) => {
+      await save('workers.absence.update', async () =>
+        fail((await supabase.from('worker_absences').update(clean({
+          date: data.date, cost: data.cost, description: data.description,
+        })).eq('id', id)).error));
+      await reload();
+    },
+
     deleteAbsence: async (_workerId, id) => {
       await save('workers.absence.delete', () => removeRow('worker_absences', id));
       await reload();
@@ -185,6 +207,14 @@ export const useWorkerStore = create<WorkerState>()(stable((set, get) => {
       await save('workers.payment', () =>
         rpc.payWorkerSalary(workerId, p.amount, p.period, p.date, p.description)
       );
+      await reload();
+    },
+
+    updatePayment: async (id, data) => {
+      await save('workers.payment.update', async () =>
+        fail((await supabase.from('worker_payments').update(clean({
+          date: data.date, amount: data.amount, period: data.period, description: data.description,
+        })).eq('id', id)).error));
       await reload();
     },
 

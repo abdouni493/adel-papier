@@ -16,6 +16,8 @@ import { printOvertimeReceipt } from '@/lib/documents';
 import { toast } from '@/components/ui/Toast';
 import { WorkerReport } from './WorkerReport';
 import { WorkerAttendance } from './WorkerAttendance';
+import { useWorkerEntryActions } from './WorkerEntryEdit';
+import { ActionMenu } from '@/components/ui/ActionMenu';
 import type { Worker, WorkerLate } from '@/types';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -42,6 +44,7 @@ export function WorkerHistory({ worker: initial, roleName, initialTab = 'payment
   const worker = useWorkerStore((s) => s.workers.find((w) => w.id === initial.id)) ?? initial;
   const { setOvertimeExcluded, setLateStatus } = useWorkerStore();
   useAttendanceSync(worker.id);
+  const entry = useWorkerEntryActions(worker.id);
   const [tab, setTab] = useState<Tab>(initialTab);
 
   // reopening the modal on another tab (e.g. the "Rapport" card button)
@@ -167,7 +170,7 @@ export function WorkerHistory({ worker: initial, roleName, initialTab = 'payment
           <EmptyState message="Aucun paiement enregistré" icon={<Banknote size={28} />} />
         ) : (
           <Table
-            head={['Date', 'Type', 'Période', 'Détail', 'Montant']}
+            head={['Date', 'Type', 'Période', 'Détail', 'Montant', '']}
             rows={payments.map((p) => [
               formatDate(p.date, language),
               <Badge key="t" variant={p.kind === 'overtime' ? 'warning' : 'info'}>
@@ -176,6 +179,7 @@ export function WorkerHistory({ worker: initial, roleName, initialTab = 'payment
               p.period || '—',
               <span key="d" className="text-text-muted">{p.description || '—'}</span>,
               <span key="a" className="tabular font-bold text-pistachio">{formatCurrency(p.amount)}</span>,
+              <ActionMenu key="m" items={entry.actions({ kind: 'payment', row: p })} />,
             ])}
           />
         )
@@ -205,13 +209,16 @@ export function WorkerHistory({ worker: initial, roleName, initialTab = 'payment
                 <Badge key="s" variant={o.isPaid ? 'success' : o.excluded ? 'neutral' : 'warning'}>
                   {o.isPaid ? 'Payée' : o.excluded ? 'Exclue' : 'Non payée'}
                 </Badge>,
-                o.isPaid ? '' : (
-                  <ToggleExclude
-                    key="x" excluded={!!o.excluded}
-                    onClick={() => void setOvertimeExcluded(o.id, !o.excluded)
-                      .then(() => toast.success(o.excluded ? 'Réactivée — comptée dans la paie' : 'Exclue des calculs'))}
-                  />
-                ),
+                <div key="x" className="flex items-center justify-end gap-1">
+                  {!o.isPaid && (
+                    <ToggleExclude
+                      excluded={!!o.excluded}
+                      onClick={() => void setOvertimeExcluded(o.id, !o.excluded)
+                        .then(() => toast.success(o.excluded ? 'Réactivée — comptée dans la paie' : 'Exclue des calculs'))}
+                    />
+                  )}
+                  <ActionMenu items={entry.actions({ kind: 'overtime', row: o })} />
+                </div>,
               ])}
             />
           </div>
@@ -255,11 +262,12 @@ export function WorkerHistory({ worker: initial, roleName, initialTab = 'payment
           <EmptyState message="Aucun acompte" icon={<Wallet size={28} />} />
         ) : (
           <Table
-            head={['Date', 'Description', 'Montant']}
+            head={['Date', 'Description', 'Montant', '']}
             rows={acomptes.map((a) => [
               formatDate(a.date, language),
               a.description || '—',
               <span key="a" className="tabular font-bold text-caramel">{formatCurrency(a.amount)}</span>,
+              <ActionMenu key="m" items={entry.actions({ kind: 'acompte', row: a })} />,
             ])}
           />
         )
@@ -270,11 +278,12 @@ export function WorkerHistory({ worker: initial, roleName, initialTab = 'payment
           <EmptyState message="Aucune absence saisie" icon={<CalendarX size={28} />} />
         ) : (
           <Table
-            head={['Date', 'Motif', 'Coût']}
+            head={['Date', 'Motif', 'Coût', '']}
             rows={absences.map((a) => [
               formatDate(a.date, language),
               a.description || '—',
               <span key="a" className="tabular font-bold text-rose-deep">{formatCurrency(a.cost)}</span>,
+              <ActionMenu key="m" items={entry.actions({ kind: 'absence', row: a })} />,
             ])}
           />
         )
@@ -283,6 +292,8 @@ export function WorkerHistory({ worker: initial, roleName, initialTab = 'payment
       {tab === 'attendance' && <WorkerAttendance worker={worker} />}
 
       {tab === 'report' && <WorkerReport worker={worker} roleName={roleName} />}
+
+      {entry.dialogs}
     </div>
   );
 }

@@ -6,6 +6,8 @@ import { useWorkerStore } from '@/store/workerStore';
 import { useLanguage } from '@/hooks/useLanguage';
 import { formatCurrency, formatDate, todayISO } from '@/lib/utils';
 import { toast } from '@/components/ui/Toast';
+import { ActionMenu } from '@/components/ui/ActionMenu';
+import { useWorkerEntryActions } from './WorkerEntryEdit';
 import type { Worker } from '@/types';
 
 export function WorkerAcompte({ worker }: { worker: Worker }) {
@@ -13,6 +15,8 @@ export function WorkerAcompte({ worker }: { worker: Worker }) {
   const addAcompte = useWorkerStore((s) => s.addAcompte);
   const workers = useWorkerStore((s) => s.workers);
   const current = workers.find((w) => w.id === worker.id) || worker;
+  const entry = useWorkerEntryActions(worker.id);
+  const list = [...current.acomptes].sort((a, b) => b.date.localeCompare(a.date));
 
   const [date, setDate] = useState(todayISO());
   const [amount, setAmount] = useState<number>(0);
@@ -41,14 +45,16 @@ export function WorkerAcompte({ worker }: { worker: Worker }) {
         <h4 className="text-sm font-semibold text-text-secondary mb-2">{t('history')}</h4>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-vanilla/60"><tr><th className="text-left px-3 py-2">{t('date')}</th><th className="text-right px-3 py-2">{t('amount')}</th><th className="text-left px-3 py-2">{t('description')}</th></tr></thead>
-            <tbody>{current.acomptes.map((a) => (
-              <tr key={a.id} className="border-t border-gold/10"><td className="px-3 py-2">{formatDate(a.date, language)}</td><td className="px-3 py-2 text-right tabular text-caramel font-medium">{formatCurrency(a.amount)}</td><td className="px-3 py-2 text-text-muted">{a.description}</td></tr>
+            <thead className="bg-vanilla/60"><tr><th className="text-left px-3 py-2">{t('date')}</th><th className="text-right px-3 py-2">{t('amount')}</th><th className="text-left px-3 py-2">{t('description')}</th><th className="w-10" /></tr></thead>
+            <tbody>{list.map((a) => (
+              <tr key={a.id} className="border-t border-gold/10"><td className="px-3 py-2">{formatDate(a.date, language)}</td><td className="px-3 py-2 text-right tabular text-caramel font-medium">{formatCurrency(a.amount)}</td><td className="px-3 py-2 text-text-muted">{a.description}</td><td className="px-2 py-1 text-right"><ActionMenu items={entry.actions({ kind: 'acompte', row: a })} /></td></tr>
             ))}</tbody>
           </table>
           {current.acomptes.length === 0 && <p className="text-center text-text-muted py-4">{t('noData')}</p>}
         </div>
       </div>
+
+      {entry.dialogs}
     </div>
   );
 }
