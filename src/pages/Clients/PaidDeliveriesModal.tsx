@@ -23,6 +23,7 @@ export function PaidDeliveriesModal({ open, onClose, deliveries, commands, clien
   const [from, setFrom] = useState(localISODate());
   const [to, setTo] = useState(localISODate());
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'all' | 'paid' | 'rest'>('all');
 
   const cmdById = useMemo(() => new Map(commands.map((c) => [c.id, c])), [commands]);
   const clientById = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
@@ -31,7 +32,13 @@ export function PaidDeliveriesModal({ open, onClose, deliveries, commands, clien
     const [a, b] = rangeOf(period, from, to);
     const q = search.trim().toLowerCase();
     return deliveries
-      .filter((d) => (d.paidAmount ?? 0) > 0 || (d.cashPaid ?? 0) > 0)
+      .filter((d) => {
+        const paid = (d.paidAmount ?? 0) > 0 || (d.cashPaid ?? 0) > 0;
+        const rest = (d.restAmount ?? 0) > 0;
+        if (status === 'paid') return paid && !rest;
+        if (status === 'rest') return rest;
+        return paid || rest;
+      })
       .map((d) => {
         const cmd = cmdById.get(d.commandId);
         const cl = cmd ? clientById.get(cmd.clientId) : undefined;
@@ -51,7 +58,7 @@ export function PaidDeliveriesModal({ open, onClose, deliveries, commands, clien
           .some((v) => v?.toLowerCase().includes(q));
       })
       .sort((x, y) => (y.d.deliveredAt || y.d.date).localeCompare(x.d.deliveredAt || x.d.date));
-  }, [deliveries, cmdById, clientById, period, from, to, search]);
+  }, [deliveries, cmdById, clientById, period, from, to, search, status]);
 
   const totals = rows.reduce(
     (t, r) => ({
@@ -64,7 +71,7 @@ export function PaidDeliveriesModal({ open, onClose, deliveries, commands, clien
   );
 
   return (
-    <Modal open={open} onClose={onClose} title="Bons de livraison payés" size="xl">
+    <Modal open={open} onClose={onClose} title="Bons de livraison payés / avec reste" size="xl">
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           {PERIODS.map((p) => (
@@ -85,6 +92,15 @@ export function PaidDeliveriesModal({ open, onClose, deliveries, commands, clien
             </label>
           </div>
         )}
+        <div className="flex flex-wrap gap-2">
+          {([['all', 'Tous'], ['paid', 'Payés entièrement'], ['rest', 'Avec reste à payer']] as const).map(([v, l]) => (
+            <button key={v} type="button" onClick={() => setStatus(v)}
+              className={cn('rounded-lg border px-3 py-1.5 text-sm transition',
+                status === v ? 'border-gold bg-gold text-white' : 'border-gray-300 hover:bg-gray-100 dark:border-gray-600 dark:hover:bg-gray-800')}>
+              {l}
+            </button>
+          ))}
+        </div>
         <SearchBar value={search} onChange={setSearch} placeholder="Rechercher un bon, un client, un téléphone…" />
         <div className="grid grid-cols-2 gap-2 rounded-lg bg-gray-50 px-4 py-2 text-sm font-medium sm:grid-cols-5 dark:bg-gray-800">
           <span>{rows.length} bon(s)</span>
@@ -94,7 +110,7 @@ export function PaidDeliveriesModal({ open, onClose, deliveries, commands, clien
           <span>Reste : {formatCurrency(totals.rest)}</span>
         </div>
         {rows.length === 0 ? (
-          <EmptyState icon={<Truck size={32} />} message="Aucun bon de livraison payé sur cette période." />
+          <EmptyState icon={<Truck size={32} />} message="Aucun bon de livraison sur cette période." />
         ) : (
           <div className="max-h-[60vh] overflow-auto">
             <table className="w-full text-sm">

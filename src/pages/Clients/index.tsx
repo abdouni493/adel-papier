@@ -425,7 +425,7 @@ export default function ClientsPage() {
               <HandCoins size={18} /> Versements
             </Button>
             <Button variant="secondary" onClick={() => setBlPaidOpen(true)}>
-              <Truck size={18} /> BL payés
+              <Truck size={18} /> BL payés / reste
             </Button>
             {can('clients', 'create') && (
               <Button variant="gold" onClick={() => { setEditing(null); setFormOpen(true); }}>
