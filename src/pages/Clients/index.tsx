@@ -25,6 +25,7 @@ import { VersementModal } from '@/components/shared/VersementModal';
 import { ClientStatementModal } from '@/components/shared/ClientStatementModal';
 import { ClientHistoryScreen } from '@/components/shared/ClientHistoryScreen';
 import { OldDebtModal } from '@/components/shared/OldDebtModal';
+import { VersementsListModal } from './VersementsListModal';
 import { RefundCreditModal } from '@/components/shared/RefundCreditModal';
 import { useClientStore } from '@/store/clientStore';
 import { useSalesStore } from '@/store/salesStore';
@@ -91,6 +92,7 @@ export default function ClientsPage() {
   const [view, setView] = useViewMode('clients');
   const [search, setSearch] = useState('');
   const [caOpen, setCaOpen] = useState(false);
+  const [versListOpen, setVersListOpen] = useState(false);
   const [caSearch, setCaSearch] = useState('');
   const [filter, setFilter] = useState<ClientFilter>('all');
   const [formOpen, setFormOpen] = useState(false);
@@ -417,6 +419,9 @@ export default function ClientsPage() {
             <Button variant="secondary" onClick={() => navigate('/commands')}>
               <ClipboardList size={18} /> Commandes
             </Button>
+            <Button variant="secondary" onClick={() => setVersListOpen(true)}>
+              <HandCoins size={18} /> Versements
+            </Button>
             {can('clients', 'create') && (
               <Button variant="gold" onClick={() => { setEditing(null); setFormOpen(true); }}>
                 <Plus size={18} /> Nouveau client
@@ -432,8 +437,13 @@ export default function ClientsPage() {
           <StatCard label="Chiffre d'affaires clients (annuelle)" value={globals.total} format="currency" icon={<Receipt size={22} />} index={0} accent="gold" />
         </div>
         <StatCard label="Dettes clients (annuelle)" value={globals.rest} format="currency" icon={<TrendingDown size={22} />} index={1} accent="rose" />
-        <StatCard label="Versements du jour" value={globals.versementsToday} format="currency" icon={<HandCoins size={22} />} index={2} accent="pistachio" />
+        <div role="button" tabIndex={0} className="cursor-pointer" title="Voir la liste des versements"
+          onClick={() => setVersListOpen(true)} onKeyDown={(e) => { if (e.key === 'Enter') setVersListOpen(true); }}>
+          <StatCard label="Versements du jour" value={globals.versementsToday} format="currency" icon={<HandCoins size={22} />} index={2} accent="pistachio" />
+        </div>
       </div>
+
+      <VersementsListModal open={versListOpen} onClose={() => setVersListOpen(false)} payments={payments} clients={clients} />
 
       <Modal open={caOpen} onClose={() => { setCaOpen(false); setCaSearch(''); }} title="Chiffre d'affaires par client (annuelle)" size="lg">
         <div className="space-y-3">
