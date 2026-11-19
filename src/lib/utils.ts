@@ -124,8 +124,8 @@ export function matchesDateFilter(
   if (filter === 'month') {
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }
-  if (filter === 'custom' && customFrom && customTo) {
-    return isWithinRange(dateStr, customFrom, customTo);
+  if (filter === 'custom' && (customFrom || customTo)) {
+    return isWithinRange(dateStr, customFrom || '1900-01-01', customTo || '9999-12-31');
   }
   return true;
 }

@@ -60,6 +60,8 @@ export default function DeliveriesPage() {
   const [tab, setTab] = useState<Tab>('deliveries');
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [periodFrom, setPeriodFrom] = useState('');
+  const [periodTo, setPeriodTo] = useState('');
   const [source, setSource] = useState<SourceFilter>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
 
@@ -92,7 +94,7 @@ export default function DeliveriesPage() {
         if (status === 'debt' && (d.restAmount ?? 0) <= 0.004) return false;
         if (status === 'paid' && (d.restAmount ?? 0) > 0.004) return false;
         if (status === 'recovered' && !(d.recoveredQuantity && d.recoveredQuantity > 0)) return false;
-        if (!matchesDateFilter(d.deliveredAt, dateFilter)) return false;
+        if (!matchesDateFilter(d.deliveredAt, dateFilter, periodFrom, periodTo)) return false;
         if (!term) return true;
         const hay = [
           d.reference, d.saleReference, cmd?.reference, cmd?.clientName, cmd?.clientPhone, cmd?.bonNumber,
@@ -100,7 +102,7 @@ export default function DeliveriesPage() {
         ].filter(Boolean).join(' ').toLowerCase();
         return hay.includes(term);
       });
-  }, [deliveries, commands, search, source, status, dateFilter]);
+  }, [deliveries, commands, search, source, status, dateFilter, periodFrom, periodTo]);
 
   const stats = useMemo(() => {
     const qty = rows.reduce((s, d) => s + d.items.reduce((a, i) => a + i.quantity, 0) - (d.recoveredQuantity ?? 0), 0);
@@ -118,13 +120,13 @@ export default function DeliveriesPage() {
     return [...recoveries]
       .sort((a, b) => b.recoveredAt.localeCompare(a.recoveredAt))
       .filter((r) => {
-        if (!matchesDateFilter(r.recoveredAt, dateFilter)) return false;
+        if (!matchesDateFilter(r.recoveredAt, dateFilter, periodFrom, periodTo)) return false;
         if (!term) return true;
         const d = deliveries.find((x) => x.id === r.deliveryId);
         return [r.reference, r.clientName, d?.reference, r.reason, ...r.items.map((i) => i.productName)]
           .filter(Boolean).join(' ').toLowerCase().includes(term);
       });
-  }, [recoveries, deliveries, search, dateFilter]);
+  }, [recoveries, deliveries, search, dateFilter, periodFrom, periodTo]);
 
   /* ---------------------------------------------------------- impression */
   const askPrintDelivery = (d: CommandDelivery) =>
@@ -317,9 +319,22 @@ export default function DeliveriesPage() {
               { value: 'today', label: "Aujourd'hui" },
               { value: 'week', label: 'Cette semaine' },
               { value: 'month', label: 'Ce mois' },
+              { value: 'custom', label: 'Par période' },
             ]}
           />
         </div>
+        {dateFilter === 'custom' && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <label className="flex items-center gap-1">Du
+              <input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)}
+                className="rounded-lg border border-gray-300 bg-transparent px-2 py-1.5 dark:border-gray-600" />
+            </label>
+            <label className="flex items-center gap-1">Au
+              <input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)}
+                className="rounded-lg border border-gray-300 bg-transparent px-2 py-1.5 dark:border-gray-600" />
+            </label>
+          </div>
+        )}
         {tab === 'deliveries' && (
           <>
             <div className="w-full sm:w-[250px]">
