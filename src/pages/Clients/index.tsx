@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import {
   Users, Plus, Pencil, Trash2, Phone, Printer, CheckCircle2,
   AlertTriangle, Receipt, TrendingDown, ClipboardList, Layers,
-  FileBarChart, HandCoins, History, PiggyBank, Undo2,
+  FileBarChart, HandCoins, History, PiggyBank, Undo2, Truck,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SearchBar } from '@/components/ui/SearchBar';
@@ -26,6 +26,7 @@ import { ClientStatementModal } from '@/components/shared/ClientStatementModal';
 import { ClientHistoryScreen } from '@/components/shared/ClientHistoryScreen';
 import { OldDebtModal } from '@/components/shared/OldDebtModal';
 import { VersementsListModal } from './VersementsListModal';
+import { PaidDeliveriesModal } from './PaidDeliveriesModal';
 import { RefundCreditModal } from '@/components/shared/RefundCreditModal';
 import { useClientStore } from '@/store/clientStore';
 import { useSalesStore } from '@/store/salesStore';
@@ -93,6 +94,7 @@ export default function ClientsPage() {
   const [search, setSearch] = useState('');
   const [caOpen, setCaOpen] = useState(false);
   const [versListOpen, setVersListOpen] = useState(false);
+  const [blPaidOpen, setBlPaidOpen] = useState(false);
   const [caSearch, setCaSearch] = useState('');
   const [filter, setFilter] = useState<ClientFilter>('all');
   const [formOpen, setFormOpen] = useState(false);
@@ -422,6 +424,9 @@ export default function ClientsPage() {
             <Button variant="secondary" onClick={() => setVersListOpen(true)}>
               <HandCoins size={18} /> Versements
             </Button>
+            <Button variant="secondary" onClick={() => setBlPaidOpen(true)}>
+              <Truck size={18} /> BL payés
+            </Button>
             {can('clients', 'create') && (
               <Button variant="gold" onClick={() => { setEditing(null); setFormOpen(true); }}>
                 <Plus size={18} /> Nouveau client
@@ -444,6 +449,8 @@ export default function ClientsPage() {
       </div>
 
       <VersementsListModal open={versListOpen} onClose={() => setVersListOpen(false)} payments={payments} clients={clients} />
+
+      <PaidDeliveriesModal open={blPaidOpen} onClose={() => setBlPaidOpen(false)} deliveries={deliveries} commands={commands} clients={clients} />
 
       <Modal open={caOpen} onClose={() => { setCaOpen(false); setCaSearch(''); }} title="Chiffre d'affaires par client (annuelle)" size="lg">
         <div className="space-y-3">

@@ -6,9 +6,9 @@ import { HandCoins } from 'lucide-react';
 import { cn, dayOf, formatCurrency, formatDateTime, localISODate, paymentMethodLabel } from '@/lib/utils';
 import type { Client, PartyPayment } from '@/types';
 
-type Period = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
+export type Period = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
 
-const PERIODS: { value: Period; label: string }[] = [
+export const PERIODS: { value: Period; label: string }[] = [
   { value: 'today', label: "Aujourd'hui" },
   { value: 'yesterday', label: 'Hier' },
   { value: 'week', label: 'Semaine dernière (7 j)' },
@@ -22,7 +22,7 @@ function shift(days: number): string {
   return localISODate(d);
 }
 
-function rangeOf(p: Period, from: string, to: string): [string, string] {
+export function rangeOf(p: Period, from: string, to: string): [string, string] {
   const today = localISODate();
   switch (p) {
     case 'today': return [today, today];
